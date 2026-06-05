@@ -1,0 +1,260 @@
+// -*- C++ -*-
+
+type            sets;
+libs            (sampling);
+
+writeControl    onEnd;
+
+interpolationScheme cellPoint;
+
+setFormat       raw;
+// fields          (p U turbulenceProperties:R wallShearStress static(p)_coeff rho);
+fields          (U turbulenceProperties:R);
+
+
+h               0.0127;
+m10_h           #eval "-10*$h";
+m4_h            #eval "-4*$h";
+m2_h            #eval "-2*$h";
+m1_h            #eval "-1*$h";
+p0_h            #eval "0*$h";
+p1_h            #eval "1*$h";
+p15_h           #eval "1.5*$h";
+p2_h            #eval "2*$h";
+p25_h           #eval "2.5*$h";
+p3_h            #eval "3*$h";
+p4_h            #eval "4*$h";
+p5_h            #eval "5*$h";
+p55_h           #eval "5.5*$h";
+p6_h            #eval "6*$h";
+p65_h           #eval "6.5*$h";
+p7_h            #eval "7*$h";
+p8_h            #eval "8*$h";
+p9_h            #eval "9*$h";
+p10_h           #eval "10*$h";
+p12_h           #eval "12*$h";
+p14_h           #eval "14*$h";
+p16_h           #eval "16*$h";
+p20_h           #eval "20*$h";
+p32_h           #eval "32*$h";
+p40_h           #eval "40*$h";
+start_y         0;
+end_y           #eval "9*$h";
+y_ref           #eval "4.5*$h";
+
+sets
+{
+    // Uref
+    // {
+    //     type    cloud;
+    //     axis    y;
+    //     points  (($m4_h $y_ref 0.01));
+    // }
+
+    x_by_h_m04
+    {
+        type    face;
+        axis    y;
+        start   ($m4_h $start_y 0);
+        end     ($m4_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_m02
+    {
+        type    face;
+        axis    y;
+        start   ($m2_h $start_y 0);
+        end     ($m2_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_m01
+    {
+        type    face;
+        axis    y;
+        start   ($m1_h $start_y 0);
+        end     ($m1_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_00
+    {
+        type    face;
+        axis    y;
+        start   ($p0_h $start_y 0);
+        end     ($p0_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_01
+    {
+        type    face;
+        axis    y;
+        start   ($p1_h $start_y 0);
+        end     ($p1_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_015
+    {
+        type    face;
+        axis    y;
+        start   ($p15_h $start_y 0);
+        end     ($p15_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_02
+    {
+        type    face;
+        axis    y;
+        start   ($p2_h $start_y 0);
+        end     ($p2_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_025
+    {
+        type    face;
+        axis    y;
+        start   ($p25_h $start_y 0);
+        end     ($p25_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_03
+    {
+        type    face;
+        axis    y;
+        start   ($p3_h $start_y 0);
+        end     ($p3_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_04
+    {
+        type    face;
+        axis    y;
+        start   ($p4_h $start_y 0);
+        end     ($p4_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_05
+    {
+        type    face;
+        axis    y;
+        start   ($p5_h $start_y 0);
+        end     ($p5_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_055
+    {
+        type    face;
+        axis    y;
+        start   ($p55_h $start_y 0);
+        end     ($p55_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_06
+    {
+        type    face;
+        axis    y;
+        start   ($p6_h $start_y 0);
+        end     ($p6_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_065
+    {
+        type    face;
+        axis    y;
+        start   ($p65_h $start_y 0);
+        end     ($p65_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_07
+    {
+        type    face;
+        axis    y;
+        start   ($p7_h $start_y 0);
+        end     ($p7_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_08
+    {
+        type    face;
+        axis    y;
+        start   ($p8_h $start_y 0);
+        end     ($p8_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_10
+    {
+        type    face;
+        axis    y;
+        start   ($p10_h $start_y 0);
+        end     ($p10_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_12
+    {
+        type    face;
+        axis    y;
+        start   ($p12_h $start_y 0);
+        end     ($p12_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_14
+    {
+        type    face;
+        axis    y;
+        start   ($p14_h $start_y 0);
+        end     ($p14_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_16
+    {
+        type    face;
+        axis    y;
+        start   ($p16_h $start_y 0);
+        end     ($p16_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_20
+    {
+        type    face;
+        axis    y;
+        start   ($p20_h $start_y 0);
+        end     ($p20_h $end_y 0);
+        nPoints 100;
+    }
+    x_by_h_32
+    {
+        type    face;
+        axis    y;
+        start   ($p32_h $start_y 0);
+        end     ($p32_h $end_y 0);
+        nPoints 100;
+    }
+
+
+    // lowerWall_upstream
+    // {
+    //     type    face;
+    //     axis    x;
+    //     start   ($m10_h $h 0);
+    //     end     (0 $h 0);
+    //     nPoints 100;
+    // }
+
+    // lowerWall_downstream
+    // {
+    //     type    face;
+    //     axis    x;
+    //     start   (0 0 0);
+    //     end     ($p40_h 0 0);
+    //     nPoints 400;
+    // }
+    // upperWall
+    // {
+    //     type    face;
+    //     axis    x;
+    //     start   ($m10_h $p9_h 0);
+    //     end     ($p40_h $p9_h 0);
+    //     nPoints 500;
+    // }
+}
+
+
+// ************************************************************************* //

@@ -1,0 +1,27 @@
+// -*- C++ -*-
+
+type            sets;
+libs            (sampling);
+
+writeControl    onEnd;
+
+interpolationScheme cellPoint;
+
+setFormat       raw;
+fields          (p U rho);
+
+
+h               0.0127;
+m4_h            #eval "-4*$h";
+
+y_ref           #eval "4.5*$h";
+
+sets
+{
+    Uref
+    {
+        type    cloud;
+        axis    y;
+        points  (($m4_h $y_ref 0.01));
+    }
+}

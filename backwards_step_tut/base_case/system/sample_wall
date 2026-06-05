@@ -1,0 +1,46 @@
+// -*- C++ -*-
+
+type            sets;
+libs            (sampling);
+
+writeControl    onEnd;
+
+interpolationScheme cellPoint;
+
+setFormat       raw;
+fields          (wallShearStress static(p)_coeff);
+
+
+h               0.0127;
+p40_h           #eval "40*$h";
+m10_h           #eval "-10*$h";
+p9_h            #eval "9*$h";
+
+sets
+{
+    lowerWall_upstream
+    {
+        type    face;
+        axis    x;
+        start   ($m10_h $h 0);
+        end     (0 $h 0);
+        nPoints 100;
+    }
+
+    lowerWall_downstream
+    {
+        type    face;
+        axis    x;
+        start   (0 0 0);
+        end     ($p40_h 0 0);
+        nPoints 400;
+    }
+    upperWall
+    {
+        type    face;
+        axis    x;
+        start   ($m10_h $p9_h 0);
+        end     ($p40_h $p9_h 0);
+        nPoints 500;
+    }
+}

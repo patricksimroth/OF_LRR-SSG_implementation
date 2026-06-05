@@ -1,0 +1,122 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+h               0.0127;
+m4_h            #eval "-4*$h";
+y_ref           #eval "4.5*$h";
+
+
+
+
+application     rhoSimpleFoam;
+
+startFrom       startTime;
+
+startTime       0;
+
+stopAt          endTime;
+
+endTime         2000; //2000;
+
+deltaT          1;
+
+writeControl    timeStep;
+
+writeInterval   100;
+
+purgeWrite      1;
+
+writeFormat     ascii;
+
+writePrecision  6;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+functions
+{
+    minMax
+    {
+        type            fieldMinMax;
+        libs            (fieldFunctionObjects);
+        mode            magnitude;
+        fields          (U p e epsilon omega k);
+        writeControl    timeStep;
+        writeInterval   10;
+    }
+    
+    yPlus
+    {
+        type            yPlus;
+        libs            (fieldFunctionObjects);
+        writeControl    onEnd;
+
+    }
+    solverInfo
+    {
+        type            solverInfo;
+        libs            (utilityFunctionObjects);
+        fields          (U p e epsilon omega k);
+        writeControl    onEnd;
+        // writeInterval   10;
+        writeResidualFields yes;
+    }
+    
+    turbulenceFields
+    {
+        type            turbulenceFields;
+        libs            (fieldFunctionObjects);
+        fields          (R devRhoReff);
+        writeControl    onEnd;
+    }
+
+    stressComponents
+    {
+        type            turbulenceFields;
+        libs            (fieldFunctionObjects);
+        writeControl    writeTime;
+        fields          (R devRhoReff epsilon);
+    }
+
+    pressureCoefficient
+    {
+        type            pressure;
+        libs            (fieldFunctionObjects);
+        writeControl    onEnd;
+        mode            staticCoeff;
+        rho             rhoInf;
+        rhoInf          1;
+        pInf            110000;
+        UInf            (44.2 0 0);
+    }
+
+    #includeFunc "MachNo"
+    #includeFunc "sample"
+    #includeFunc "wallShearStress"
+    #includeFunc "writeCellCentres"
+
+
+    #includeFunc "Uref"
+    #includeFunc "sample_wall"
+}
+
+
+// ************************************************************************* //

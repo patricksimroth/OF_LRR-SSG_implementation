@@ -1,0 +1,13 @@
+// -*- C++ -*-
+
+type            exprField;
+libs            (fieldFunctionObjects);
+
+field           MachNo;
+expression      "mag(U)/sqrt(T*1.4*287.05)";
+dimensions      [0 0 0 0 0 0 0];
+readFields      (U T);
+useNamePrefix   false;
+
+executeControl  onEnd;
+writeControl    onEnd;

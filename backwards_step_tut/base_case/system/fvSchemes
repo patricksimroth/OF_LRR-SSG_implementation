@@ -1,0 +1,76 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSchemes;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+ddtSchemes
+{
+    default         steadyState;
+}
+
+gradSchemes
+{
+    default         Gauss linear;
+}
+
+divSchemes
+{
+    default         none;
+
+    div(phi,U)      bounded Gauss LUST grad(U);
+    div(phid,p)         bounded Gauss limitedLinear 1;		//new
+    
+    div(phi,nuTilda)  bounded Gauss upwind; //SA
+    div(phi,e)          bounded Gauss limitedLinear 1;		//new
+    // div(phi,e)          bounded Gauss upwind;
+    div(phi,Ekp)        bounded Gauss limitedLinear 1;		//new
+    // div(phi,Ekp)        Gauss upwind;
+    div(devRhoReff)     Gauss linear;		//new
+    // div(devRhoReff)     Gauss upwind;
+    // turbulence          bounded Gauss limitedLinear 1;
+    turbulence        bounded Gauss upwind;
+    div(phi,k)          $turbulence;
+    div(phi,epsilon)    bounded Gauss upwind;
+    div(phi,omega)      $turbulence;
+    div(phi,R)          bounded Gauss upwind;		//SSG
+    div((rho*R))        Gauss linear;		//SSG
+    
+    div(((rho*nuEff)*dev2(T(grad(U)))))      Gauss linear;		//new
+    div((nuEff*dev2(T(grad(U)))))                      Gauss linear;//linear
+    div(((rho*(thermo:mu|rho))*dev2(T(grad(U)))))      Gauss linear;		//SSG
+
+}
+
+laplacianSchemes
+{
+    default         Gauss linear corrected;
+}
+
+interpolationSchemes
+{
+    default         linear;
+}
+
+snGradSchemes
+{
+    default         corrected;
+}
+
+wallDist
+{
+    method          meshWave;
+}
+
+
+// ************************************************************************* //

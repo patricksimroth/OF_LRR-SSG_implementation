@@ -1,0 +1,75 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      createPatchDict;
+}
+
+// Do not sync points across cyclic boundaries
+pointSync false;
+
+patches
+(
+    // 1. COMBINING AND RENAMING PATCHES
+    {
+        name                upperWall;          // Name of the new combined patch
+        patchInfo
+        {
+            type            wall;       // Desired boundary type
+        }
+        constructFrom   patches;        // Tell OpenFOAM to look at existing patches
+        patches         (auto4);  // List the patches you want to merge
+    }
+
+    {
+        name                lowerWall;          // Name of the new combined patch
+        patchInfo
+        {
+            type            wall;       // Desired boundary type
+        }
+        constructFrom   patches;        // Tell OpenFOAM to look at existing patches
+        patches         (auto1 auto5 auto6);  // List the patches you want to merge
+    }
+
+    {
+        name                front;          // Name of the new combined patch
+        patchInfo
+        {
+            type            empty;       // Desired boundary type
+        }
+        constructFrom   patches;        // Tell OpenFOAM to look at existing patches
+        patches         (auto2);  // List the patches you want to merge
+    }
+
+
+    {
+        name                back;          // Name of the new combined patch
+        patchInfo
+        {
+            type            empty;       // Desired boundary type
+        }
+        constructFrom   patches;        // Tell OpenFOAM to look at existing patches
+        patches         (auto3);  // List the patches you want to merge
+    }
+
+    {
+        name            inlet;          // New name
+        patchInfo
+        {
+            type            patch;      // Desired boundary type
+        }
+        constructFrom   patches;
+        patches         (auto0);        // Old name
+    }
+
+    {
+        name            outlet;          // New name
+        patchInfo
+        {
+            type            patch;      // Desired boundary type
+        }
+        constructFrom   patches;
+        patches         (auto7);        // Old name
+    }
+);

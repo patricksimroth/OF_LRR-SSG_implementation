@@ -1,0 +1,22 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+restore0Dir
+
+rm log.*
+
+rm constant/thermophysicalProperties
+
+runApplication blockMesh
+runApplication simpleFoam
+
+runApplication checkMesh -writeAllFields -latestTime -allTopology -allGeometry
+
+# source $FOAM_RUN/.venv/bin/activate
+# python3 postpro.py
+
+touch p.foam
+
+#------------------------------------------------------------------------------
