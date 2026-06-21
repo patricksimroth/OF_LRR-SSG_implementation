@@ -75,8 +75,8 @@ functions
         type            solverInfo;
         libs            (utilityFunctionObjects);
         fields          (U p e epsilon omega k);
-        writeControl    onEnd;
-        // writeInterval   10;
+        // writeControl    onEnd;
+        writeInterval   timeStep;
         writeResidualFields yes;
     }
     
@@ -85,14 +85,16 @@ functions
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
         fields          (R devRhoReff);
-        writeControl    onEnd;
+        // writeControl    onEnd;
+        writeInterval   timeStep;
     }
 
     stressComponents
     {
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
-        writeControl    writeTime;
+        // writeControl    onEnd;
+        writeInterval   timeStep;
         fields          (R devRhoReff epsilon);
     }
 
@@ -108,7 +110,14 @@ functions
         UInf            (44.2 0 0);
     }
 
-    #includeFunc "MachNo"
+    MachNo
+    {
+        type            MachNo;
+        libs            (fieldFunctionObjects);
+        writeInterval   timeStep;
+    }
+
+    // #includeFunc "MachNo"
     #includeFunc "sample"
     #includeFunc "wallShearStress"
     #includeFunc "writeCellCentres"

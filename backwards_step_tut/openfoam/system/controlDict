@@ -102,6 +102,13 @@ functions
         UInf            (44.2 0 0);
     }
 
+    MachNo
+    {
+        type            MachNo;
+        libs            (fieldFunctionObjects);
+        writeInterval   timeStep;
+    }
+
     #includeFunc "sample"
     #includeFunc "wallShearStress"
     #includeFunc "writeCellCentres"

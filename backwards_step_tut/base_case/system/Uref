@@ -3,8 +3,8 @@
 type            sets;
 libs            (sampling);
 
-writeControl    onEnd;
-
+// writeControl    onEnd;
+writeInterval   timeStep;
 interpolationScheme cellPoint;
 
 setFormat       raw;
