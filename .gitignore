@@ -3,3 +3,4 @@ run/
 __pycache__/
 polyMesh_tmr/
 .git/
+.*/

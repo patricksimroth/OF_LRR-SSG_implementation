@@ -4,6 +4,13 @@
 # set -e
 clear
 
+# Parse command-line filters
+RUN_ALL=true
+if [ $# -gt 0 ]; then
+    RUN_ALL=false
+    FILTERS=("$@")
+fi
+
 # 1. Clean up the 'run' directory at the start
 echo "=========================================="
 echo "Cleaning up the 'run' and 'results' directory..."
@@ -33,6 +40,42 @@ for case_dir in *; do
             continue
         fi
 
+        # Determine if this case matches filters and has at least one matching variant
+        case_has_matching_variant=false
+        if [ "$RUN_ALL" = true ]; then
+            case_has_matching_variant=true
+        else
+            for filter in "${FILTERS[@]}"; do
+                case_filter="${filter%%/*}"
+                if [[ "$case_dir" == $case_filter ]]; then
+                    if [[ "$filter" != *"/"* ]]; then
+                        case_has_matching_variant=true
+                        break
+                    else
+                        model_filter="${filter#*/}"
+                        IFS=',' read -r -a allowed_models <<< "$model_filter"
+                        for variant_path in "$case_dir"/*; do
+                            if [ -d "$variant_path" ]; then
+                                variant_name=$(basename "$variant_path")
+                                if [ "$variant_name" != "base_case" ] && [[ "$variant_name" != _* ]]; then
+                                    for model in "${allowed_models[@]}"; do
+                                        if [[ "$variant_name" == $model ]]; then
+                                            case_has_matching_variant=true
+                                            break 3
+                                        fi
+                                    done
+                                fi
+                            fi
+                        done
+                    fi
+                fi
+            done
+        fi
+
+        if [ "$case_has_matching_variant" = false ]; then
+            continue
+        fi
+
         echo ""
         echo "Processing case: $case_dir"
         echo "------------------------------------------"
@@ -44,6 +87,35 @@ for case_dir in *; do
 
                 # Exclude 'base_case' and any directory starting with an underscore (_)
                 if [ "$variant_name" == "base_case" ] || [[ "$variant_name" == _* ]]; then
+                    continue
+                fi
+
+                # Determine if this variant matches any of the filter arguments
+                variant_matched=false
+                if [ "$RUN_ALL" = true ]; then
+                    variant_matched=true
+                else
+                    for filter in "${FILTERS[@]}"; do
+                        case_filter="${filter%%/*}"
+                        if [[ "$case_dir" == $case_filter ]]; then
+                            if [[ "$filter" != *"/"* ]]; then
+                                variant_matched=true
+                                break
+                            else
+                                model_filter="${filter#*/}"
+                                IFS=',' read -r -a allowed_models <<< "$model_filter"
+                                for model in "${allowed_models[@]}"; do
+                                    if [[ "$variant_name" == $model ]]; then
+                                        variant_matched=true
+                                        break 2
+                                    fi
+                                done
+                            fi
+                        fi
+                    done
+                fi
+
+                if [ "$variant_matched" = false ]; then
                     continue
                 fi
 
