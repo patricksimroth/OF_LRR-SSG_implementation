@@ -1,0 +1,20 @@
+// -*- C++ -*-
+
+type            sets;
+libs            (sampling);
+writeControl    onEnd;
+interpolationScheme cellPoint;
+setFormat       raw;
+fields          (rho yPlus U wallShearStress);
+sets
+{
+    x1_profile
+    {
+        type        face;
+        axis        y;
+        start       (2 0.0 0.05);
+        end         (2 1.0  0.05);
+        nPoints     400;
+    }
+}
+// ************************************************************************* //
