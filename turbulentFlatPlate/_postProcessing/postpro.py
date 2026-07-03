@@ -25,6 +25,7 @@ import pandas as pd
 # Constants
 # ---------------------------------------------------------------------------
 MU_LAM = 1.831e-05   # Pa·s  – from thermophysicalProperties (const transport)
+RHO = 1.2747          # kg/m³ – from thermophysicalProperties (const transport)
 # ---------------------------------------------------------------------------
 # Path helpers  (mirrored from backwards_step_tut)
 # ---------------------------------------------------------------------------
@@ -231,7 +232,7 @@ def parse_sample_profile(sample_dir):
 # ---------------------------------------------------------------------------
 # u+ / y+ computation
 # ---------------------------------------------------------------------------
-def compute_uplus_yplus(df, mu=MU_LAM):
+def compute_uplus_yplus(df, mu=MU_LAM, rho=RHO):
     """
     Compute u+ and y+ from the sampled profile DataFrame.
     Strategy
@@ -245,9 +246,9 @@ def compute_uplus_yplus(df, mu=MU_LAM):
     * y+  = u_tau * y / nu   (equivalent to the original yPlus field)
     """
     df = df.copy()
-    df["nu"] = mu / df["rho"]
+    df["nu"] = mu / rho
     # u_tau from yPlus definition: y+ = u_tau * y / nu  → u_tau = y+ * nu / y
-    df["u_tau_local"] = np.sqrt(np.abs(df["tau_x"] / df["rho"]))
+    df["u_tau_local"] = np.sqrt(np.abs(df["tau_x"] / rho))
     # Average u_tau over near-wall region (yPlus < 200) to get a single value
     # near_wall = df.iloc[1]   # first point
     u_tau = max(df["u_tau_local"])
@@ -262,7 +263,7 @@ def compute_uplus_yplus(df, mu=MU_LAM):
 # ---------------------------------------------------------------------------
 def plot_uplus_yplus(theory, models_data, output_dir):
     """
-    Plot u+ vs log10(y+) for all models against the theoretical curves.
+    Plot u+ vs y+ (on log scale) for all models against the theoretical curves.
     Parameters
     ----------
     theory      : dict from parse_theory_data()
@@ -271,11 +272,11 @@ def plot_uplus_yplus(theory, models_data, output_dir):
     """
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 7))
-    # Theory curves
+    # Theory curves (convert from log10(y+) to y+)
     u_plus_th = theory["u_plus"]
-    ax.plot(theory["log_y_inner"], u_plus_th,
+    ax.plot(10**theory["log_y_inner"], u_plus_th,
             color="green", linewidth=1.2, linestyle="-", label="viscous sublayer (u⁺ = y⁺)")
-    ax.plot(theory["log_y_log"],   u_plus_th,
+    ax.plot(10**theory["log_y_log"],   u_plus_th,
             color="green", linewidth=1.2, linestyle="--", label="log law (κ=0.41, B=5.0)")
     # Simulation profiles
     prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -283,15 +284,15 @@ def plot_uplus_yplus(theory, models_data, output_dir):
     for idx, (model_name, df) in enumerate(sorted(models_data.items())):
         color = sim_colors[idx % len(sim_colors)]
         valid = df[df["y_plus"] > 0].copy()
-        log_yp = np.log10(valid["y_plus"])
-        ax.plot(log_yp, valid["u_plus"],
+        ax.plot(valid["y_plus"], valid["u_plus"],
                 color=color, linewidth=1.8, label=f"{model_name}")
-    ax.set_xlabel("log(y+)", fontsize=13)
+    ax.set_xscale("log")
+    ax.set_xlabel("y+", fontsize=13)
     ax.set_ylabel("u+", fontsize=13)
-    ax.set_title("Law of the Wall – u+ vs log(y+)  [x = 1 m]", fontsize=14)
+    ax.set_title("Law of the Wall – u+ vs y+ (log scale)  [x = 1 m]", fontsize=14)
     ax.legend(fontsize=11)
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.set_xlim(-1, 5)
+    ax.grid(True, linestyle="--", alpha=0.5, which="both")
+    ax.set_xlim(0.1, 1e5)
     ax.set_ylim(0, 30)
     fig.tight_layout()
     out_path = os.path.join(output_dir, "plot_uplus_yplus.png")

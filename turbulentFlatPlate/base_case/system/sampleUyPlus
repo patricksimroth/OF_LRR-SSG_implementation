@@ -3,7 +3,7 @@
 type            sets;
 libs            (sampling);
 writeControl    onEnd;
-interpolationScheme cellPoint;
+interpolationScheme cellPoint; // cellPoint; 
 setFormat       raw;
 fields          (rho yPlus U wallShearStress);
 sets
@@ -12,9 +12,9 @@ sets
     {
         type        face;
         axis        y;
-        start       (2 0.0 0.05);
-        end         (2 1.0  0.05);
-        nPoints     400;
+        start       (1 0.0 0.05);
+        end         (1 0.1  0.05);
+        nPoints     1000;
     }
 }
 // ************************************************************************* //

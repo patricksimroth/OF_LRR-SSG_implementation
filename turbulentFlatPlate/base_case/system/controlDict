@@ -79,7 +79,7 @@ functions
         libs            (fieldFunctionObjects);
         fields          (R devRhoReff);
         // writeControl    onEnd;
-        writeInterval   timeStep;
+        writeInterval   10;
     }
 
     stressComponents
@@ -87,7 +87,7 @@ functions
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
         // writeControl    onEnd;
-        writeInterval   timeStep;
+        writeInterval   10;
         fields          (R devRhoReff epsilon);
     }
 
