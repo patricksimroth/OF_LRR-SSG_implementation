@@ -3,30 +3,6 @@ cd "${0%/*}" || exit                                # Run from this directory
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
 #------------------------------------------------------------------------------
 
-#######################################
-# Extract a value (Eg, from boundaryField/bump/value)
-# Arguments:
-#    $1 = dictEntry
-#    $2 = inputFile
-#    $3 = outputFile
-# Outputs:
-#    Writes to 'outputFile'
-# Notes:
-#    Only retains values between, but not including the ( ) delimiters.
-#    For example,
-#----
-#    value           nonuniform List<scalar>
-#    110
-#    (
-#    0.0041520092
-#    0.012577691
-#    0.021250264
-#    0.030176962
-#    )
-#    ;
-#######################################
-
-
 restore0Dir
 
 rm log.*
