@@ -4,11 +4,26 @@
 # set -e
 clear
 
+# Helper: format elapsed seconds as HH:MM:SS
+format_time() {
+    local total_seconds=$1
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+    printf "%02d:%02d:%02d" "$hours" "$minutes" "$seconds"
+}
+
 # Parse command-line filters
 RUN_ALL=true
+script_start=$(date +%s)
 if [ $# -gt 0 ]; then
     RUN_ALL=false
-    FILTERS=("$@")
+    FILTERS=()
+    for arg in "$@"; do
+        # Remove trailing slashes to handle inputs like "case/" or "case/model/"
+        arg="${arg%/}"
+        FILTERS+=("$arg")
+    done
 fi
 
 # 1. Clean up the 'run' directory at the start
@@ -135,6 +150,7 @@ for case_dir in *; do
                 # 4. Execute the Allrun script in serial
                 if [ -f "$target_run_dir/Allrun" ]; then
                     echo "  -> Running Allrun for $variant_name..."
+                    variant_start=$(date +%s)
                     
                     # Subshell execution (cd into target, run, then safely return automatically)
                     (
@@ -144,7 +160,9 @@ for case_dir in *; do
                         ./Allrun
                     )
                     
-                    echo "  -> Finished $variant_name."
+                    variant_end=$(date +%s)
+                    variant_elapsed=$((variant_end - variant_start))
+                    echo "  -> Finished $variant_name in $(format_time $variant_elapsed) ($variant_elapsed s)."
                 else
                     echo "  -> [Warning] No Allrun script found in $target_run_dir"
                 fi
@@ -191,7 +209,10 @@ for case_dir in *; do
     fi
 done
 
+script_end=$(date +%s)
+total_elapsed=$((script_end - script_start))
 echo ""
 echo "=========================================="
 echo "All simulations completed successfully!"
+echo "Total elapsed time: $(format_time $total_elapsed) ($total_elapsed s)"
 echo "=========================================="

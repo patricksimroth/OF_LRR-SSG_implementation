@@ -19,9 +19,9 @@ solvers
     p
     {
         solver          GAMG;
+        smoother        DICGaussSeidel; //rm DIC for run time
         tolerance       1e-10;
-        relTol          0.01; //0.001
-        smoother        DICGaussSeidel;
+        relTol          0.001; //0.001
         // nPreSweeps      0; //1
         // nPostSweeps     2;
         // cacheAgglomeration on;

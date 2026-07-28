@@ -1,4 +1,4 @@
-results/
+results*/
 run/
 __pycache__/
 polyMesh_tmr/
