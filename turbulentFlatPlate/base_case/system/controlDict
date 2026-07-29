@@ -14,7 +14,7 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-application     rhoSimpleFoam;
+application     simpleFoam;
 
 startFrom       startTime;
 
@@ -22,7 +22,7 @@ startTime       0;
 
 stopAt          endTime;
 
-endTime         1000; //2000;
+endTime         5000;
 
 deltaT          1;
 
@@ -77,8 +77,7 @@ functions
     {
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
-        fields          (R devRhoReff);
-        // writeControl    onEnd;
+        fields          (R);
         writeInterval   10;
     }
 
@@ -86,9 +85,8 @@ functions
     {
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
-        // writeControl    onEnd;
         writeInterval   10;
-        fields          (R devRhoReff epsilon);
+        fields          (R epsilon); //devRhoReff
     }
 
     pressureCoefficient
@@ -104,14 +102,70 @@ functions
     }
 
     #includeFunc "MachNo"
-    // #includeFunc "sample"
-    #includeFunc "wallShearStress"
+
+    wallShearStress
+    {
+        type            wallShearStress;
+        libs            (fieldFunctionObjects);
+        writeFields     no;
+        executeControl  timeStep;
+        writeControl    timeStep;
+        writeInterval   10;
+    }
+
     #includeFunc "writeCellCentres"
 
-
-    // #includeFunc "Uref"
-    // #includeFunc "sample_wall"
     #includeFunc "sampleUyPlus"
+
+    yPlus_reference
+    {
+        type            probes;
+        libs            (fieldFunctionObjects);
+        fields          (yPlus U wallShearStress);
+        probeLocations
+        (
+            (1 0.0 0.05)
+        );
+        writeControl    timeStep;
+        writeInterval   10;
+        // interpolationScheme cellPoint;
+    }
+
+    yPlus_reference_2
+    {
+        type            surfaces;
+        libs            (fieldFunctionObjects);
+        surfaceFormat   raw;
+        fields          (yPlus U wallShearStress);
+        // interpolationScheme cellPoint;
+        // enabled         true;
+        surfaces
+        (
+            Wall
+            {
+                type            patch;
+                patches         (bottomWall);
+                // interpolate     true;
+            }
+        );
+        writeControl    timeStep;
+        writeInterval   10;
+    }
+
+    probes
+    {
+        type            probes;
+        libs            (fieldFunctionObjects);
+        fields          (U);
+        probeLocations
+        (
+            (1.0 0.005 0.05)
+            (1.0 0.01 0.05)
+            (1.0 0.015 0.05)
+        );
+        writeControl    timeStep;
+        writeInterval   10;
+    }
 }
 
 

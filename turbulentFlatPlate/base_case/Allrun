@@ -8,7 +8,9 @@ restore0Dir
 rm log.*
 
 runApplication blockMesh
-runApplication rhoSimpleFoam
+runApplication decomposePar
+runParallel simpleFoam
+runApplication reconstructPar -latestTime
 
 runApplication checkMesh -writeAllFields -latestTime -allTopology -allGeometry
 

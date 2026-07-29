@@ -234,6 +234,18 @@ def build_dashboard(case_name, run_case_dir: Path, results_root: Path):
     generated_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     # Collect validation images (u+/y+ plot)
     val_images = image_files(val_dir)
+    # Separate the Ux vs y plot from other validation images
+    ux_y_plot = None
+    velocity_plot = None
+    remaining_images = []
+    for img in val_images:
+        if "plot_Ux_vs_y" in img.name:
+            ux_y_plot = img
+        elif "velocity_evolution" in img.name:
+            velocity_plot = img
+        else:
+            remaining_images.append(img)
+    val_images = remaining_images
     # Per-model sections
     model_sections = []
     for model in models:
@@ -331,6 +343,10 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
       log-law (κ&nbsp;=&nbsp;0.41, B&nbsp;=&nbsp;5.0) from White (1974).
     </p>
     {render_gallery(val_images, results_root, "No validation plot found – run postpro.py first.")}
+    {f'<h2>Velocity Profile – Ux vs y</h2>' if ux_y_plot else ''}
+    {f'<p><img src="{img_src(ux_y_plot, results_root)}" alt="Ux vs y Profile" style="max-width:100%;">' if ux_y_plot else ''}
+    {f'<h2>Velocity Evolution at Probe Points</h2>' if velocity_plot else ''}
+    {f'<p><img src="{img_src(velocity_plot, results_root)}" alt="Velocity Evolution" style="max-width:100%;">' if velocity_plot else ''}
   </section>
   <section id="models">
     <h2>Models</h2>

@@ -19,7 +19,7 @@ solvers
     p
     {
         solver          GAMG;
-        smoother        DICGaussSeidel; //rm DIC for run time
+        smoother        GaussSeidel; //rm DIC for run time
         tolerance       1e-10;
         relTol          0.001; //0.001
         // nPreSweeps      0; //1

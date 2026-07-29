@@ -26,6 +26,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 MU_LAM = 1.831e-05   # Pa·s  – from thermophysicalProperties (const transport)
 RHO = 1.2747          # kg/m³ – from thermophysicalProperties (const transport)
+RHO=1
 # ---------------------------------------------------------------------------
 # Path helpers  (mirrored from backwards_step_tut)
 # ---------------------------------------------------------------------------
@@ -206,28 +207,114 @@ def parse_sample_profile(sample_dir):
         return None
 
     arr = np.array(rows)
-    # Expected columns: y Ux Uy Uz yPlus rho
+
     if arr.shape[1] < 6:
         print(f"  [warn] unexpected column count ({arr.shape[1]}) in {file_path}")
         return None
-    df = pd.DataFrame({
-        "y":     arr[:, 0],
-        "rho":   arr[:, 1],
-        "yPlus": arr[:, 2],
-        "Ux":    arr[:, 3],
-        "Uy":    arr[:, 4],
-        "Uz":    arr[:, 5],
-        "tau_x": arr[:, 6],
-        "tau_y": arr[:, 7],
-        "tau_z": arr[:, 8],
-    })
+    try:
+        df = pd.DataFrame({
+            "y":     arr[:, 0],
+            "rho":   arr[:, 1],
+            "yPlus": arr[:, 2],
+            "Ux":    arr[:, 3],
+            "Uy":    arr[:, 4],
+            "Uz":    arr[:, 5],
+            "tau_x": arr[:, 6],
+            "tau_y": arr[:, 7],
+            "tau_z": arr[:, 8],
+        })
+    except IndexError:
+        df = pd.DataFrame({
+            "y":     arr[:, 0],
+            "yPlus": arr[:, 1],
+            "Ux":    arr[:, 2],
+            "Uy":    arr[:, 3],
+            "Uz":    arr[:, 4],
+            "tau_x": arr[:, 5],
+            "tau_y": arr[:, 6],
+            "tau_z": arr[:, 7],
+        })
     # Keep only the boundary layer (positive Ux, positive y)
     # df = df[df["y"] > 0].copy()
     df.sort_values("y", inplace=True)
     df.reset_index(drop=True, inplace=True)
     print(f"  Loaded {len(df)} sample points from {os.path.basename(file_path)}")
-    print(df[["y", "Ux", "yPlus", "rho"]].head(5))
-    print(df[["y", "Ux", "yPlus", "rho"]].tail(5))
+    print(df[["y", "Ux", "yPlus"]].head(5))
+    print(df[["y", "Ux", "yPlus"]].tail(5))
+    return df
+
+def parse_probes_data(probes_dir):
+    """
+    Parse probes data from the probes function object.
+    Returns a DataFrame with time and velocity components at probe locations.
+
+    The probe file format is:
+        # Probe 0 (x y z)
+        # Probe 1 (x y z)
+        # Time   0   1   2
+        time   (Ux0 Uy0 Uz0) (Ux1 Uy1 Uz1) (Ux2 Uy2 Uz2)
+        ...
+    """
+    if not probes_dir or not os.path.isdir(probes_dir):
+        return None
+
+    # Find the probes file (named "U" in the probes directory)
+    candidates = sorted(glob.glob(os.path.join(probes_dir, "U")))
+    if not candidates:
+        print(f"  [warn] no probes U file in {probes_dir}")
+        return None
+
+    file_path = candidates[0]
+
+    parsed_data = []
+
+    with open(file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+
+            # Extract time (first number on the line)
+            time_match = re.match(r'^\s*(\d+\.?\d*)', line)
+            if not time_match:
+                continue
+            time_val = float(time_match.group(1))
+
+            # Extract all parenthesized groups (probe data) - handles cases
+            # where parentheses are split across whitespace tokens
+            probe_matches = re.findall(r'\(([^)]+)\)', line)
+
+            for probe_idx, probe_str in enumerate(probe_matches):
+                try:
+                    u_vals = [float(x) for x in probe_str.split()]
+                    if len(u_vals) >= 3:
+                        parsed_data.append({
+                            'time': time_val,
+                            'probe_idx': probe_idx,
+                            'Ux': u_vals[0],
+                            'Uy': u_vals[1],
+                            'Uz': u_vals[2]
+                        })
+                except ValueError:
+                    continue
+
+    if not parsed_data:
+        print(f"  [warn] could not parse valid probe data from {file_path}")
+        return None
+
+    # Convert to DataFrame and pivot so each probe has its own columns
+    df = pd.DataFrame(parsed_data)
+    if 'probe_idx' in df.columns and len(df) > 0:
+        pivot_df = df.pivot_table(
+            index='time', columns='probe_idx', values=['Ux', 'Uy', 'Uz']
+        )
+        pivot_df.columns = [
+            f'probe_{idx}_{field}' for field, idx in pivot_df.columns
+        ]
+        df = pivot_df.reset_index()
+
+    print(f"  Loaded {len(df)} time steps with probe data from "
+          f"{os.path.basename(file_path)}")
     return df
 # ---------------------------------------------------------------------------
 # u+ / y+ computation
@@ -300,6 +387,121 @@ def plot_uplus_yplus(theory, models_data, output_dir):
     plt.close(fig)
     print(f"  u+/y+ plot → {out_path}")
     return out_path
+
+def plot_Ux_vs_y(models_data, output_dir):
+    """
+    Plot Ux vs y (linear scale) for all models.
+    Parameters
+    ----------
+    models_data : {model_name: DataFrame with Ux, y columns}
+    output_dir  : directory where the PNG is saved
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Q1: both axes linear; y-axis focused on the near-wall region
+    ax.set_xscale("linear")
+    ax.set_yscale("linear")
+
+    # Simulation profiles
+    prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    sim_colors = [c for c in prop_cycle if c.lower() not in ("#00ff00", "#008000")]
+    csv_frames = []
+    for idx, (model_name, df) in enumerate(sorted(models_data.items())):
+        color = sim_colors[idx % len(sim_colors)]
+        # Q2: keep the wall point at y = 0 (do not drop it)
+        ax.plot(df["Ux"], df["y"],
+                color=color, linewidth=1.8, label=f"{model_name}")
+        # Q4 (self-chosen): also export the plotted data to CSV for reuse
+        csv_frames.append(pd.DataFrame({
+            "model": model_name,
+            "y": df["y"].values,
+            "Ux": df["Ux"].values,
+        }))
+
+    # Q3: no theoretical/reference profile is plotted in this figure yet
+    ax.set_xlabel("Ux (m/s)", fontsize=13)
+    ax.set_ylabel("y (m)", fontsize=13)
+    ax.set_title("Velocity Profile – Ux vs y  [x = 1 m]", fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, linestyle="--", alpha=0.5, which="both")
+    ax.set_ylim(0, 0.02)
+    ax.set_xlim(0, 70)
+    fig.tight_layout()
+    out_path = os.path.join(output_dir, "plot_Ux_vs_y.png")
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+    if csv_frames:
+        csv_path = os.path.join(output_dir, "Ux_vs_y_profiles.csv")
+        pd.concat(csv_frames, ignore_index=True).to_csv(csv_path, index=False)
+        print(f"  Ux vs y CSV  → {csv_path}")
+
+    print(f"  Ux vs y plot → {out_path}")
+    return out_path
+
+def plot_velocity_evolution_at_points(models_data, output_dir):
+    """
+    Plot velocity evolution at the probe points over time.
+    Creates one subplot per probe location.
+    """
+    # Determine number of probes from the data
+    n_probes = 0
+    for df in models_data.values():
+        if df is not None:
+            probe_columns = [
+                col for col in df.columns
+                if col.startswith('probe_') and col.endswith('_Ux')
+            ]
+            if probe_columns:
+                n_probes = max(n_probes, len(probe_columns))
+
+    if n_probes == 0:
+        print(f"  [warn] no probe data to plot")
+        return None
+
+    # Y-positions matching the probes (from controlDict)
+    y_positions = [0.005, 0.01, 0.015]
+
+    # Create subplots - one per probe
+    fig, axes = plt.subplots(1, n_probes, figsize=(5 * n_probes, 5), sharey=True)
+    if n_probes == 1:
+        axes = [axes]
+
+    fig.suptitle('Velocity Evolution at Probe Points (x=1m)', fontsize=14)
+
+    # Color cycle for different models
+    prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    colors = [c for c in prop_cycle if c.lower() not in ("#00ff00", "#008000")]
+
+    # Plot for each model
+    for idx, (model_name, df) in enumerate(models_data.items()):
+        if df is None or 'time' not in df.columns:
+            continue
+        color = colors[idx % len(colors)]
+
+        for probe_idx in range(n_probes):
+            ux_col = f'probe_{probe_idx}_Ux'
+            if ux_col in df.columns:
+                y_label = y_positions[probe_idx] if probe_idx < len(y_positions) else probe_idx
+                axes[probe_idx].plot(
+                    df['time'], df[ux_col],
+                    color=color, label=model_name, linewidth=1.5
+                )
+                axes[probe_idx].set_title(f'Probe {probe_idx + 1} (y={y_label} m)')
+                axes[probe_idx].set_xlabel('Time')
+                axes[probe_idx].grid(True, linestyle='--', alpha=0.5)
+
+    axes[0].set_ylabel('Ux Velocity')
+    axes[0].legend(loc='upper right')
+
+    # Save the plot
+    output_path = os.path.join(output_dir, "velocity_evolution_at_points.png")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"  Velocity evolution plot → {output_path}")
+    return output_path
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -333,6 +535,7 @@ if __name__ == "__main__":
     if not model_folders:
         print(f"[warn] no model folders found under {run_case_dir}")
     models_uplus = {}   # {model_name: DataFrame(u_plus, y_plus)}
+    models_probes = {}  # {model_name: DataFrame(time, Ux, Uy, Uz)}
     for model_name in sorted(model_folders):
         print(f"\n--- Model: {model_name} ---")
         case_folder  = os.path.join(run_case_dir, model_name)
@@ -358,11 +561,34 @@ if __name__ == "__main__":
             continue
         df_prof, u_tau = compute_uplus_yplus(df_raw, mu=MU_LAM)
         models_uplus[model_name] = df_prof
+        
+        # --- Probes data ---
+        probes_base = os.path.join(case_folder, "postProcessing", "probes")
+        probes_dir = latest_time_directory(probes_base)
+        if probes_dir is not None:
+            df_probes = parse_probes_data(probes_dir)
+            if df_probes is not None:
+                models_probes[model_name] = df_probes
+            else:
+                print(f"  [warn] failed to parse probes data for {model_name}")
+        else:
+            print(f"  [warn] no probes output found for {model_name}")
+
     # --- Combined u+/y+ validation plot ---
     if theory and models_uplus:
         val_dir = os.path.join(results_root, "validation")
         print(f"\nGenerating u+/y+ validation plot in {val_dir} …")
         plot_uplus_yplus(theory, models_uplus, val_dir)
+        
+        # --- Ux vs y profile plot ---
+        print(f"Generating Ux vs y profile plot in {val_dir} …")
+        plot_Ux_vs_y(models_uplus, val_dir)
+    
+    # --- Velocity evolution plot ---
+    if models_probes:
+        val_dir = os.path.join(results_root, "validation")
+        print(f"\nGenerating velocity evolution plot in {val_dir} …")
+        plot_velocity_evolution_at_points(models_probes, val_dir)
     else:
         if not theory:
             print("[warn] skipping u+/y+ plot – no theory data")
