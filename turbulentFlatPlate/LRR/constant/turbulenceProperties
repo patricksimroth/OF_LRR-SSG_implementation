@@ -19,10 +19,10 @@ simulationType      RAS;
 RAS
 {
     RASModel        LRR;
-
     turbulence      on;
-
     printCoeffs     on;
+    // wallReflection  false;
+    couplingFactor 1.0;
 }
 
 

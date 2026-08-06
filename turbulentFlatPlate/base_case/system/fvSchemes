@@ -40,6 +40,7 @@ divSchemes
     div(R)              Gauss linear;		//simpleFoam
     div(phi,Ekp)        bounded Gauss linear;
     // turbulence          bounded Gauss limitedLinear 1;
+    div(devRhoReff)     Gauss linear;    //rhoSimpleFoam
     turbulence        bounded Gauss limitedLinear 1;
     div(phi,k)          $turbulence;
     div(phi,epsilon)    $turbulence;

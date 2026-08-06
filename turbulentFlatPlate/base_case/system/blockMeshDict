@@ -16,7 +16,7 @@ FoamFile
 
 scale   0.333333333333333;
 
-GRADING 10000;
+GRADING 50000;
 // n_y 385;
 // n_x 449;
 // n_x_symmetry 96;

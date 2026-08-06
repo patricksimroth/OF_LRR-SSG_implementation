@@ -20,8 +20,8 @@ solvers
     {
         solver          GAMG;
         smoother        GaussSeidel; //rm DIC for run time
-        tolerance       1e-10;
-        relTol          0.001; //0.001
+        tolerance       1e-11;
+        relTol          0.05; //0.001
         // nPreSweeps      0; //1
         // nPostSweeps     2;
         // cacheAgglomeration on;
@@ -34,8 +34,8 @@ solvers
     {
         solver          smoothSolver;
         smoother        symGaussSeidel;
-        tolerance       1e-10;
-        relTol          0.01;
+        tolerance       1e-11;
+        relTol          0.05;
     }
 
     "(omega|epsilon|k)"
@@ -50,25 +50,25 @@ solvers
 SIMPLE
 {
     nNonOrthogonalCorrectors 0;
+    consistent          yes;
 
 
     residualControl
     {
-        p               1e-6;
-        U               1e-6;
-        "(k|epsilon|omega|f|v2|e|R|nuTilda)" 1e-6;
+        p               1e-8;
+        U               1e-8;
+        "(k|epsilon|omega|f|v2|e|R|nuTilda)" 1e-8;
     }
 
 
-    consistent          yes;
 }
 
 relaxationFactors
 {
     equations
     {
-        U               0.7;
-        ".*"            0.6;
+        U               0.6;
+        ".*"            0.5;
     }
 }
 

@@ -24,7 +24,8 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MU_LAM = 1.831e-05   # Pa·s  – from thermophysicalProperties (const transport)
+MU_LAM = 1.388e-05   # Pa·s  – from thermophysicalProperties (const transport)
+# MU_LAM = 2e-7   # Pa·s  – from thermophysicalProperties (const transport)
 RHO = 1.2747          # kg/m³ – from thermophysicalProperties (const transport)
 RHO=1
 # ---------------------------------------------------------------------------
@@ -332,6 +333,8 @@ def compute_uplus_yplus(df, mu=MU_LAM, rho=RHO):
     * u+  = Ux / u_tau
     * y+  = u_tau * y / nu   (equivalent to the original yPlus field)
     """
+    
+
     df = df.copy()
     df["nu"] = mu / rho
     # u_tau from yPlus definition: y+ = u_tau * y / nu  → u_tau = y+ * nu / y
