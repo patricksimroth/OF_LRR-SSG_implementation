@@ -14,7 +14,12 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-application     simpleFoam;
+application     rhoSimpleFoam;
+
+libs
+(
+    "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SSGLRROmega2019/lib/libSSGLRROmega2019Compressible.so"
+);
 
 startFrom       startTime;
 
@@ -22,7 +27,7 @@ startTime       0;
 
 stopAt          endTime;
 
-endTime         4000;
+endTime         20000;
 
 deltaT          1;
 
@@ -54,8 +59,9 @@ functions
     {
         type            yPlus;
         libs            (fieldFunctionObjects);
-        writeControl    onEnd;
-
+        patches         (bottomWall);
+        writeFields     yes;
+        writeControl    writeTime;
     }
     solverInfo
     {
@@ -92,7 +98,7 @@ functions
         rho             rhoInf;
         rhoInf          1;
         pInf            110000;
-        UInf            (44.2 0 0);
+        UInf            (69.4 0 0);
     }
 
     #includeFunc "MachNo"
@@ -101,15 +107,20 @@ functions
     {
         type            wallShearStress;
         libs            (fieldFunctionObjects);
-        writeFields     no;
-        executeControl  timeStep;
-        writeControl    timeStep;
-        writeInterval   10;
+        patches         (bottomWall);
+        writeFields     yes;
+        writeControl    writeTime;
     }
 
     #includeFunc "writeCellCentres"
 
     #includeFunc "sampleUyPlus"
+
+    #includeFunc "sampleUyPlusConv"
+
+    #includeFunc "samplePlate"
+
+    #includeFunc "sampleProfile"
 
     yPlus_reference
     {
@@ -146,19 +157,49 @@ functions
         writeInterval   10;
     }
 
-    probes
+    integralCf
     {
-        type            probes;
-        libs            (fieldFunctionObjects);
-        fields          (U);
-        probeLocations
-        (
-            (1.0 0.005 0.05)
-            (1.0 0.01 0.05)
-            (1.0 0.015 0.05)
-        );
+        type            forceCoeffs;
+        libs            (forces);
+        patches         (bottomWall);
+        p               p;
+        U               U;
+        rho             rho;
+        rhoInf          1.2745;
+        dragDir         (1 0 0);
+        liftDir         (0 1 0);
+        pitchAxis       (0 0 1);
+        CofR            (0 0 0);
+        magUInf         69.4;
+        lRef            2;
+        Aref            0.1;
+        coefficients    (Cd);
+        writeFields     no;
+        executeControl  timeStep;
+        executeInterval 1;
+        writeControl    writeTime;
+    }
+
+    integralCfStop
+    {
+        type            runTimeControl;
+        libs            (utilityFunctionObjects);
         writeControl    timeStep;
-        writeInterval   10;
+        writeInterval   1;
+        conditions
+        {
+            integralCfAverage
+            {
+                type            average;
+                functionObject  integralCf;
+                fields          (Cd);
+                tolerance       1e-6;
+                window          300;
+                windowType      exact;
+                nIterStartUp    2000;
+            }
+        }
+        satisfiedAction end;
     }
 }
 

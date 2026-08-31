@@ -14,8 +14,8 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// dimensions      [1 -1 -2 0 0 0 0];
-dimensions      [0 2 -2 0 0 0 0];
+dimensions      [1 -1 -2 0 0 0 0];      //rhoSimpleFoam
+// dimensions      [0 2 -2 0 0 0 0];    //simpleFoam
 
 internalField   uniform 110000;
 

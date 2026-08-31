@@ -1,0 +1,3 @@
+SSGLRROmega2019Compressible.C
+
+LIB = $(PWD)/lib/libSSGLRROmega2019Compressible
