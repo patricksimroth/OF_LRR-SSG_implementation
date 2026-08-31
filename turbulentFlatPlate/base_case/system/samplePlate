@@ -1,0 +1,39 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      samplePlate;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Samples wallShearStress and yPlus on the complete plate patch, mirroring
+// the sampling setup of the flat_plate_andre_v2 comparison.
+// Runs during the solve (included via #includeFunc in controlDict),
+// writes at end:  postProcessing/samplePlate/<endTime>/
+
+type                surfaces;
+libs                (sampling);
+writeControl        onEnd;
+surfaceFormat       raw;
+interpolationScheme cell;
+fields              (wallShearStress yPlus);
+
+surfaces
+{
+    bottomWall
+    {
+        type        patch;
+        patches     (bottomWall);
+        triangulate false;
+    }
+}
+
+// ************************************************************************* //

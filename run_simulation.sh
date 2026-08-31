@@ -16,6 +16,8 @@ format_time() {
 # Parse command-line filters
 RUN_ALL=true
 script_start=$(date +%s)
+FAILED_VARIANTS=()
+FAILED_POSTPROC=()
 if [ $# -gt 0 ]; then
     RUN_ALL=false
     FILTERS=()
@@ -42,6 +44,17 @@ if [ -d "results" ]; then
     rm -rf results/*
 else
     mkdir results
+fi
+
+# 1b. Build the custom SSG/LRR-omega turbulence model library (if source present)
+if [ -d "src/SSGLRROmega2019" ]; then
+    echo "=========================================="
+    echo "Building custom turbulence model (SSGLRROmega2019)..."
+    echo "=========================================="
+    if [ -z "$WM_PROJECT_DIR" ]; then
+        source /usr/lib/openfoam/openfoam2512/etc/bashrc
+    fi
+    (cd src/SSGLRROmega2019 && wmake libso) || echo "  [warn] custom model build failed"
 fi
 
 # 2. Find all directories at the root level
@@ -147,25 +160,30 @@ for case_dir in *; do
                 # Step B: Overwrite/add variant-specific dictionaries (e.g., turbulenceProperties)
                 cp -r "$variant_path/." "$target_run_dir/"
 
-                # 4. Execute the Allrun script in serial
-                if [ -f "$target_run_dir/Allrun" ]; then
-                    echo "  -> Running Allrun for $variant_name..."
-                    variant_start=$(date +%s)
-                    
-                    # Subshell execution (cd into target, run, then safely return automatically)
-                    (
-                        cd "$target_run_dir"
-                        # Ensure Allrun has execution permissions
-                        chmod +x Allrun
-                        ./Allrun
-                    )
-                    
-                    variant_end=$(date +%s)
-                    variant_elapsed=$((variant_end - variant_start))
-                    echo "  -> Finished $variant_name in $(format_time $variant_elapsed) ($variant_elapsed s)."
-                else
-                    echo "  -> [Warning] No Allrun script found in $target_run_dir"
-                fi
+                 # 4. Execute the Allrun script in serial
+                 if [ -f "$target_run_dir/Allrun" ]; then
+                     echo "  -> Running Allrun for $variant_name..."
+                     variant_start=$(date +%s)
+
+                     # Subshell execution (cd into target, run, then safely return automatically)
+                     (
+                         cd "$target_run_dir"
+                         # Ensure Allrun has execution permissions
+                         chmod +x Allrun
+                         ./Allrun
+                     )
+                     variant_rc=$?
+                     variant_end=$(date +%s)
+                     variant_elapsed=$((variant_end - variant_start))
+                     if [ $variant_rc -ne 0 ]; then
+                         echo "  -> [FAILED] $variant_name (exit $variant_rc) in $(format_time $variant_elapsed) — logs: run/$case_dir/$variant_name/log.*"
+                         FAILED_VARIANTS+=("$case_dir/$variant_name")
+                     else
+                         echo "  -> Finished $variant_name in $(format_time $variant_elapsed) ($variant_elapsed s)."
+                     fi
+                 else
+                     echo "  -> [Warning] No Allrun script found in $target_run_dir"
+                 fi
             fi
         done
 
@@ -188,10 +206,15 @@ for case_dir in *; do
                     output_file="run/$case_dir/${script_name}.log"
                     echo "  -> Running post-processing script: $script_path, output will be saved to $output_file"
                     python3 "$script_path" > "$output_file" 2>&1
+                    rc=$?
+                    if [ $rc -ne 0 ]; then
+                        echo "  -> [FAILED] $script_name.py (exit $rc) — log: $output_file"
+                        FAILED_POSTPROC+=("$case_dir/$script_name.py")
+                    fi
                 fi
             }
 
-            for script_name in postpro dashboard; do
+            for script_name in postpro; do
                 script_path="run/$case_dir/$script_name.py"
                 if [ -f "$script_path" ]; then
                     run_postproc_script "$script_path"
@@ -201,10 +224,21 @@ for case_dir in *; do
             for script_path in "run/$case_dir"/*.py; do
                 [ -f "$script_path" ] || continue
                 script_name=$(basename "$script_path" .py)
+                [[ "$script_name" == _* ]] && continue
                 if [ "$script_name" != "postpro" ] && [ "$script_name" != "dashboard" ]; then
                     run_postproc_script "$script_path"
                 fi
             done
+
+            if [ ${#FAILED_VARIANTS[@]} -gt 0 ]; then
+                echo "  [warn] running post-processing despite failed variant(s): ${FAILED_VARIANTS[*]}"
+            fi
+
+            # dashboard runs last so it sees all images produced by the other scripts
+            script_path="run/$case_dir/dashboard.py"
+            if [ -f "$script_path" ]; then
+                run_postproc_script "$script_path"
+            fi
         fi
     fi
 done
@@ -213,6 +247,12 @@ script_end=$(date +%s)
 total_elapsed=$((script_end - script_start))
 echo ""
 echo "=========================================="
-echo "All simulations completed successfully!"
+if [ ${#FAILED_VARIANTS[@]} -eq 0 ] && [ ${#FAILED_POSTPROC[@]} -eq 0 ]; then
+    echo "All simulations completed successfully!"
+else
+    echo "Completed with failures:"
+    [ ${#FAILED_VARIANTS[@]} -gt 0 ] && echo "  failed variants : ${FAILED_VARIANTS[*]}"
+    [ ${#FAILED_POSTPROC[@]} -gt 0 ] && echo "  failed scripts  : ${FAILED_POSTPROC[*]}"
+fi
 echo "Total elapsed time: $(format_time $total_elapsed) ($total_elapsed s)"
 echo "=========================================="

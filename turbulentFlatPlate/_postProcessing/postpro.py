@@ -2,7 +2,8 @@
 postpro.py – Post-processing for the turbulentFlatPlate case.
 Reads sampled wall-normal profiles at x = 1 m (from the sampleUyPlus
 function object) and computes u+ / y+ for comparison against the
-theoretical inner-law and log-law curves provided in _validation_data/.
+theoretical inner-law and log-law curves provided in _validation_data/
+and the Coles law (tmr_coles_upyp.dat).
 Can be called either from the source _postProcessing/ directory or from the
 run/turbulentFlatPlate/ directory (same path-resolution logic as the
 backwards-step case).
@@ -12,56 +13,21 @@ import io
 import itertools
 import os
 import re
+
 # pyrefly: ignore [missing-import]
 import matplotlib
+
 matplotlib.use("Agg")
 # pyrefly: ignore [missing-import]
 import matplotlib.pyplot as plt
+
 # pyrefly: ignore [missing-import]
 import numpy as np
+
 # pyrefly: ignore [missing-import]
 import pandas as pd
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-MU_LAM = 1.388e-05   # Pa·s  – from thermophysicalProperties (const transport)
-# MU_LAM = 2e-7   # Pa·s  – from thermophysicalProperties (const transport)
-RHO = 1.2747          # kg/m³ – from thermophysicalProperties (const transport)
-RHO=1
-# ---------------------------------------------------------------------------
-# Path helpers  (mirrored from backwards_step_tut)
-# ---------------------------------------------------------------------------
-def resolve_case_paths(script_dir):
-    """Return (base_path, case_name, run_case_dir, source_case_dir, results_root)."""
-    if os.path.basename(script_dir) == "_postProcessing":
-        source_case_dir = os.path.dirname(script_dir)
-        case_name = os.path.basename(source_case_dir)
-        base_path = os.path.dirname(source_case_dir)
-        run_case_dir = os.path.join(base_path, "run", case_name)
-    else:
-        case_name = os.path.basename(script_dir)
-        parent_dir = os.path.dirname(script_dir)
-        if os.path.basename(parent_dir) == "run":
-            base_path = os.path.dirname(parent_dir)
-            run_case_dir = script_dir
-            source_case_dir = os.path.join(base_path, case_name)
-        else:
-            base_path = parent_dir
-            run_case_dir = os.path.join(base_path, "run", case_name)
-            source_case_dir = script_dir
-    results_root = os.path.join(base_path, "results", case_name)
-    return base_path, case_name, run_case_dir, source_case_dir, results_root
-def latest_time_directory(parent):
-    """Return the path to the highest-numbered time-step subdirectory."""
-    if not parent or not os.path.isdir(parent):
-        return None
-    candidates = []
-    for item in os.listdir(parent):
-        try:
-            candidates.append((float(item), os.path.join(parent, item)))
-        except ValueError:
-            pass
-    return max(candidates, key=lambda x: x[0])[1] if candidates else None
+
+import _pp_common as pp
 # ---------------------------------------------------------------------------
 # Convergence plots  (identical helpers to backwards_step_tut)
 # ---------------------------------------------------------------------------
@@ -69,7 +35,7 @@ def plot_minMax_data(file_path, output_path):
     line_regex = re.compile(
         r"^\s*(?P<time>\d+\.?\d*)\s+"
         r"(?P<field>[^\s\t]+)\s+"
-        r"(?P<min>[e\d\.\-\+]+)\s+\(.*\)\s+"
+        r"(?P<min>[e\d\.\-\+]+)\s+\(.*\)\s+(?:\d+\s+)?"
         r"(?P<max>[e\d\.\-\+]+)\s+\(.*\)"
     )
     field_data = {}
@@ -158,7 +124,7 @@ def parse_theory_data(validation_file):
     with open(validation_file) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("#") or line.startswith("variables"):
+            if not line or line.startswith(("#", "variables")):
                 continue
             try:
                 rows.append([float(v) for v in line.split()])
@@ -175,24 +141,40 @@ def parse_theory_data(validation_file):
 # ---------------------------------------------------------------------------
 # Sample-file parser
 # ---------------------------------------------------------------------------
-def _read_numeric_rows(file_path):
-    rows = []
-    with open(file_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            try:
-                rows.append([float(v) for v in line.split()])
-            except ValueError:
-                pass
-    return rows
+def _profile_columns_from_filename(file_path):
+    """Derive column names from an `x1_profile_<field>_<field>_..._.xy` filename.
+
+    The sets function object names its output after the sampled fields.  The
+    name is only trusted when it expands to the actual column count (checked
+    by the caller).  Returns a list of column names or None.
+    """
+    base = os.path.basename(file_path)
+    prefix = "x1_profile_"
+    if not base.startswith(prefix) or not base.endswith(".xy"):
+        return None
+    cols = ["y"]
+    for token in base[len(prefix):-len(".xy")].split("_"):
+        if token == "rho":
+            cols.append("rho")
+        elif token == "yPlus":
+            cols.append("yPlus")
+        elif token == "U":
+            cols.extend(["Ux", "Uy", "Uz"])
+        elif token == "wallShearStress":
+            cols.extend(["tau_x", "tau_y", "tau_z"])
+        else:
+            return None
+    return cols
+
 def parse_sample_profile(sample_dir):
     """
-    Find the x1_profile_*.xy file in *sample_dir* and return a DataFrame
-    with columns [y, Ux, Uy, Uz, yPlus, rho].
-    The sampleUyPlus function object writes fields (U yPlus rho), so the
-    raw columns are:  y  Ux Uy Uz  yPlus  rho
+    Find the x1_profile_*.xy file in *sample_dir* and return a DataFrame.
+    Columns are `y` followed by the `sampleUyPlus` fields in controlDict order
+    (`(rho yPlus U wallShearStress)`): 9 columns when the solver provides `rho`
+    (compressible), 8 when it does not (incompressible).
+    Column names come from the file name when it is in the
+    `x1_profile_<fields>.xy` pattern and matches the column count, otherwise
+    from the column count directly.
     """
     if not sample_dir or not os.path.isdir(sample_dir):
         return None
@@ -202,41 +184,39 @@ def parse_sample_profile(sample_dir):
         print(f"  [warn] no x1_profile*.xy in {sample_dir}")
         return None
     file_path = candidates[0]
-    rows = _read_numeric_rows(file_path)
-    if not rows:
+    arr = pp.read_numeric_rows(file_path)
+    if arr is None:
         print(f"  [warn] empty sample file: {file_path}")
         return None
 
-    arr = np.array(rows)
+    cols = _profile_columns_from_filename(file_path)
+    if cols is not None and len(cols) != arr.shape[1]:
+        cols = None
+    if cols is None:
+        if arr.shape[1] == 9:
+            cols = ["y", "rho", "yPlus", "Ux", "Uy", "Uz", "tau_x", "tau_y", "tau_z"]
+        elif arr.shape[1] == 8:
+            cols = ["y", "yPlus", "Ux", "Uy", "Uz", "tau_x", "tau_y", "tau_z"]
+        else:
+            print(f"  [warn] unexpected column count ({arr.shape[1]}) in {file_path}")
+            return None
 
-    if arr.shape[1] < 6:
-        print(f"  [warn] unexpected column count ({arr.shape[1]}) in {file_path}")
-        return None
-    try:
-        df = pd.DataFrame({
-            "y":     arr[:, 0],
-            "rho":   arr[:, 1],
-            "yPlus": arr[:, 2],
-            "Ux":    arr[:, 3],
-            "Uy":    arr[:, 4],
-            "Uz":    arr[:, 5],
-            "tau_x": arr[:, 6],
-            "tau_y": arr[:, 7],
-            "tau_z": arr[:, 8],
-        })
-    except IndexError:
-        df = pd.DataFrame({
-            "y":     arr[:, 0],
-            "yPlus": arr[:, 1],
-            "Ux":    arr[:, 2],
-            "Uy":    arr[:, 3],
-            "Uz":    arr[:, 4],
-            "tau_x": arr[:, 5],
-            "tau_y": arr[:, 6],
-            "tau_z": arr[:, 7],
-        })
-    # Keep only the boundary layer (positive Ux, positive y)
-    # df = df[df["y"] > 0].copy()
+    # Old method (kept for reference): tried the 9-column mapping and fell
+    # back to the 8-column one via IndexError.
+    # try:
+    #     df = pd.DataFrame({
+    #         "y": arr[:, 0], "rho": arr[:, 1], "yPlus": arr[:, 2],
+    #         "Ux": arr[:, 3], "Uy": arr[:, 4], "Uz": arr[:, 5],
+    #         "tau_x": arr[:, 6], "tau_y": arr[:, 7], "tau_z": arr[:, 8],
+    #     })
+    # except IndexError:
+    #     df = pd.DataFrame({
+    #         "y": arr[:, 0], "yPlus": arr[:, 1], "Ux": arr[:, 2],
+    #         "Uy": arr[:, 3], "Uz": arr[:, 4],
+    #         "tau_x": arr[:, 5], "tau_y": arr[:, 6], "tau_z": arr[:, 7],
+    #     })
+
+    df = pd.DataFrame(arr, columns=cols)
     df.sort_values("y", inplace=True)
     df.reset_index(drop=True, inplace=True)
     print(f"  Loaded {len(df)} sample points from {os.path.basename(file_path)}")
@@ -244,114 +224,38 @@ def parse_sample_profile(sample_dir):
     print(df[["y", "Ux", "yPlus"]].tail(5))
     return df
 
-def parse_probes_data(probes_dir):
-    """
-    Parse probes data from the probes function object.
-    Returns a DataFrame with time and velocity components at probe locations.
-
-    The probe file format is:
-        # Probe 0 (x y z)
-        # Probe 1 (x y z)
-        # Time   0   1   2
-        time   (Ux0 Uy0 Uz0) (Ux1 Uy1 Uz1) (Ux2 Uy2 Uz2)
-        ...
-    """
-    if not probes_dir or not os.path.isdir(probes_dir):
-        return None
-
-    # Find the probes file (named "U" in the probes directory)
-    candidates = sorted(glob.glob(os.path.join(probes_dir, "U")))
-    if not candidates:
-        print(f"  [warn] no probes U file in {probes_dir}")
-        return None
-
-    file_path = candidates[0]
-
-    parsed_data = []
-
-    with open(file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-
-            # Extract time (first number on the line)
-            time_match = re.match(r'^\s*(\d+\.?\d*)', line)
-            if not time_match:
-                continue
-            time_val = float(time_match.group(1))
-
-            # Extract all parenthesized groups (probe data) - handles cases
-            # where parentheses are split across whitespace tokens
-            probe_matches = re.findall(r'\(([^)]+)\)', line)
-
-            for probe_idx, probe_str in enumerate(probe_matches):
-                try:
-                    u_vals = [float(x) for x in probe_str.split()]
-                    if len(u_vals) >= 3:
-                        parsed_data.append({
-                            'time': time_val,
-                            'probe_idx': probe_idx,
-                            'Ux': u_vals[0],
-                            'Uy': u_vals[1],
-                            'Uz': u_vals[2]
-                        })
-                except ValueError:
-                    continue
-
-    if not parsed_data:
-        print(f"  [warn] could not parse valid probe data from {file_path}")
-        return None
-
-    # Convert to DataFrame and pivot so each probe has its own columns
-    df = pd.DataFrame(parsed_data)
-    if 'probe_idx' in df.columns and len(df) > 0:
-        pivot_df = df.pivot_table(
-            index='time', columns='probe_idx', values=['Ux', 'Uy', 'Uz']
-        )
-        pivot_df.columns = [
-            f'probe_{idx}_{field}' for field, idx in pivot_df.columns
-        ]
-        df = pivot_df.reset_index()
-
-    print(f"  Loaded {len(df)} time steps with probe data from "
-          f"{os.path.basename(file_path)}")
-    return df
 # ---------------------------------------------------------------------------
 # u+ / y+ computation
 # ---------------------------------------------------------------------------
-def compute_uplus_yplus(df, mu=MU_LAM, rho=RHO):
+def compute_uplus_yplus(df, nu, rho=None):
     """
     Compute u+ and y+ from the sampled profile DataFrame.
-    Strategy
-    --------
-    * nu = mu / rho  (cell-local, so it varies with rho along the profile)
-    * u_tau is computed from the yPlus field and the physical y distance:
-          u_tau(cell) = yPlus(cell) * nu(cell) / y(cell)
-      We use the mean of the near-wall cells (y+ < 200) for a single u_tau
-      estimate per profile, which is robust to mesh non-uniformity.
-    * u+  = Ux / u_tau
-    * y+  = u_tau * y / nu   (equivalent to the original yPlus field)
-    """
-    
 
+    * u_tau(cell) = sqrt(|tau_x(cell)| / rho(cell)); rho is taken from the
+      sampled `rho` column when present (compressible case), otherwise from
+      the scalar fallback `rho` from pp.detect_case_parameters().
+    * u_tau = max(u_tau_local) over the profile.
+    * u+  = Ux / u_tau
+    * y+  = u_tau * y / nu; nu is the constant from transportProperties
+      (`transport const` pins nu, so mu = nu * rho_local).
+    """
     df = df.copy()
-    df["nu"] = mu / rho
-    # u_tau from yPlus definition: y+ = u_tau * y / nu  → u_tau = y+ * nu / y
-    df["u_tau_local"] = np.sqrt(np.abs(df["tau_x"] / rho))
-    # Average u_tau over near-wall region (yPlus < 200) to get a single value
-    # near_wall = df.iloc[1]   # first point
+    if "rho" in df.columns:
+        rho_field = df["rho"].astype(float)
+    else:
+        rho_field = float(rho if rho is not None else 1.0)
+    df["u_tau_local"] = np.sqrt(np.abs(df["tau_x"] / rho_field))
     u_tau = max(df["u_tau_local"])
     print(f"  u_tau = {u_tau:.5f} m/s")
     df["u_plus"] = df["Ux"] / u_tau
-    df["y_plus"] = df["y"] * u_tau / df["nu"]
+    df["y_plus"] = df["y"] * u_tau / nu
     print(df[["y", "Ux", "yPlus", "u_plus", "y_plus", "u_tau_local"]].head(5))
     print(df[["y", "Ux", "yPlus", "u_plus", "y_plus", "u_tau_local"]].tail(5))
     return df, u_tau
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def plot_uplus_yplus(theory, models_data, output_dir):
+def plot_uplus_yplus(theory, models_data, output_dir, coles=None):
     """
     Plot u+ vs y+ (on log scale) for all models against the theoretical curves.
     Parameters
@@ -359,6 +263,7 @@ def plot_uplus_yplus(theory, models_data, output_dir):
     theory      : dict from parse_theory_data()
     models_data : {model_name: DataFrame with u_plus, y_plus columns}
     output_dir  : directory where the PNG is saved
+    coles       : optional (N, 2) array (y+, u+) from tmr_coles_upyp.dat
     """
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 7))
@@ -368,9 +273,14 @@ def plot_uplus_yplus(theory, models_data, output_dir):
             color="green", linewidth=1.2, linestyle="-", label="viscous sublayer (u⁺ = y⁺)")
     ax.plot(10**theory["log_y_log"],   u_plus_th,
             color="green", linewidth=1.2, linestyle="--", label="log law (κ=0.41, B=5.0)")
-    # Simulation profiles
+    if coles is not None:
+        ax.plot(coles[:, 0], coles[:, 1],
+                color="tab:purple", linewidth=1.5,
+                label="Coles, Re_θ = 10 000 (Bardina et al., NASA TM-110446)")
+    # Simulation profiles (green = theory, purple = Coles reference)
     prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    sim_colors = [c for c in prop_cycle if c.lower() not in ("#00ff00", "#008000")]
+    sim_colors = [c for c in prop_cycle
+                  if c.lower() not in ("#00ff00", "#008000", "#9467bd")]
     for idx, (model_name, df) in enumerate(sorted(models_data.items())):
         color = sim_colors[idx % len(sim_colors)]
         valid = df[df["y_plus"] > 0].copy()
@@ -402,9 +312,19 @@ def plot_Ux_vs_y(models_data, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 7))
 
-    # Q1: both axes linear; y-axis focused on the near-wall region
+    # Both axes linear; y-axis focused on the boundary layer
     ax.set_xscale("linear")
     ax.set_yscale("linear")
+
+    # Data-driven limits: full U range and the 99 %-U boundary-layer edge
+    u_max = max(df["Ux"].max() for df in models_data.values())
+    y_edges = []
+    for df in models_data.values():
+        d = df.sort_values("y")
+        above = d[d["Ux"] >= 0.99 * d["Ux"].max()]
+        if not above.empty:
+            y_edges.append(float(above["y"].min()))
+    y_max = 1.05 * max(y_edges) if y_edges else max(df["y"].max() for df in models_data.values())
 
     # Simulation profiles
     prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -412,24 +332,22 @@ def plot_Ux_vs_y(models_data, output_dir):
     csv_frames = []
     for idx, (model_name, df) in enumerate(sorted(models_data.items())):
         color = sim_colors[idx % len(sim_colors)]
-        # Q2: keep the wall point at y = 0 (do not drop it)
         ax.plot(df["Ux"], df["y"],
                 color=color, linewidth=1.8, label=f"{model_name}")
-        # Q4 (self-chosen): also export the plotted data to CSV for reuse
+        # also export the plotted data to CSV for reuse
         csv_frames.append(pd.DataFrame({
             "model": model_name,
             "y": df["y"].values,
             "Ux": df["Ux"].values,
         }))
 
-    # Q3: no theoretical/reference profile is plotted in this figure yet
     ax.set_xlabel("Ux (m/s)", fontsize=13)
     ax.set_ylabel("y (m)", fontsize=13)
     ax.set_title("Velocity Profile – Ux vs y  [x = 1 m]", fontsize=14)
     ax.legend(fontsize=11)
     ax.grid(True, linestyle="--", alpha=0.5, which="both")
-    ax.set_ylim(0, 0.02)
-    ax.set_xlim(0, 70)
+    ax.set_xlim(0, 1.05 * u_max)
+    ax.set_ylim(0, y_max)
     fig.tight_layout()
     out_path = os.path.join(output_dir, "plot_Ux_vs_y.png")
     fig.savefig(out_path, dpi=150)
@@ -443,68 +361,83 @@ def plot_Ux_vs_y(models_data, output_dir):
     print(f"  Ux vs y plot → {out_path}")
     return out_path
 
-def plot_velocity_evolution_at_points(models_data, output_dir):
+def plot_velocity_convergence(model_name, case_folder, output_path):
     """
-    Plot velocity evolution at the probe points over time.
-    Creates one subplot per probe location.
+    Per-model convergence figure: one Ux-vs-y profile for each of the
+    20/40/60/80/100 % checkpoints of the run (closest available
+    sampleUyPlusConv snapshot), light -> dark in time order.
+    Saved to <output_path>/convergence_plots/plot_velocity_convergence.png.
     """
-    # Determine number of probes from the data
-    n_probes = 0
-    for df in models_data.values():
-        if df is not None:
-            probe_columns = [
-                col for col in df.columns
-                if col.startswith('probe_') and col.endswith('_Ux')
-            ]
-            if probe_columns:
-                n_probes = max(n_probes, len(probe_columns))
-
-    if n_probes == 0:
-        print(f"  [warn] no probe data to plot")
+    conv_base = os.path.join(case_folder, "postProcessing", "sampleUyPlusConv")
+    if not os.path.isdir(conv_base):
+        print(f"  [warn] no sampleUyPlusConv output for {model_name} – skipping convergence plot")
+        return None
+    times = []
+    for item in os.listdir(conv_base):
+        try:
+            times.append(float(item))
+        except ValueError:
+            pass
+    if not times:
+        print(f"  [warn] no sampleUyPlusConv snapshots for {model_name} – skipping convergence plot")
         return None
 
-    # Y-positions matching the probes (from controlDict)
-    y_positions = [0.005, 0.01, 0.015]
+    end_time = max(times)
 
-    # Create subplots - one per probe
-    fig, axes = plt.subplots(1, n_probes, figsize=(5 * n_probes, 5), sharey=True)
-    if n_probes == 1:
-        axes = [axes]
-
-    fig.suptitle('Velocity Evolution at Probe Points (x=1m)', fontsize=14)
-
-    # Color cycle for different models
-    prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    colors = [c for c in prop_cycle if c.lower() not in ("#00ff00", "#008000")]
-
-    # Plot for each model
-    for idx, (model_name, df) in enumerate(models_data.items()):
-        if df is None or 'time' not in df.columns:
+    profiles = []
+    for pct in (20, 40, 60, 80, 100):
+        target = end_time * pct / 100.0
+        t = min(times, key=lambda t: abs(t - target))
+        if t in [p[0] for p in profiles]:
             continue
-        color = colors[idx % len(colors)]
+        t_name = str(int(t)) if t == int(t) else str(t)
+        df = parse_sample_profile(os.path.join(conv_base, t_name))
+        if df is None or df.empty:
+            print(f"  [warn] could not parse sampleUyPlusConv snapshot t={t:g} for {model_name}")
+            continue
+        label = f"t = {t:g}" + (f" ({pct:g}%)" if t == target else "")
+        profiles.append((t, df, label))
 
-        for probe_idx in range(n_probes):
-            ux_col = f'probe_{probe_idx}_Ux'
-            if ux_col in df.columns:
-                y_label = y_positions[probe_idx] if probe_idx < len(y_positions) else probe_idx
-                axes[probe_idx].plot(
-                    df['time'], df[ux_col],
-                    color=color, label=model_name, linewidth=1.5
-                )
-                axes[probe_idx].set_title(f'Probe {probe_idx + 1} (y={y_label} m)')
-                axes[probe_idx].set_xlabel('Time')
-                axes[probe_idx].grid(True, linestyle='--', alpha=0.5)
+    if not profiles:
+        print(f"  [warn] no parseable sampleUyPlusConv snapshots for {model_name}")
+        return None
 
-    axes[0].set_ylabel('Ux Velocity')
-    axes[0].legend(loc='upper right')
+    profiles.sort(key=lambda p: p[0])
 
-    # Save the plot
-    output_path = os.path.join(output_dir, "velocity_evolution_at_points.png")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
+    # Data-driven limits: full U range and the 99 %-U boundary-layer edge
+    u_max = max(df["Ux"].max() for _, df, _ in profiles)
+    y_edges = []
+    for _, df, _ in profiles:
+        d = df.sort_values("y")
+        above = d[d["Ux"] >= 0.99 * d["Ux"].max()]
+        if not above.empty:
+            y_edges.append(float(above["y"].min()))
+    y_max = 1.05 * max(y_edges) if y_edges else max(df["y"].max() for _, df, _ in profiles)
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    cmap = plt.get_cmap("Blues")
+    n = len(profiles)
+    for i, (t, df, label) in enumerate(profiles):
+        frac = 0.35 + 0.65 * (i / max(n - 1, 1))
+        ax.plot(df["Ux"], df["y"],
+                color=cmap(frac), linewidth=1.8 if i == n - 1 else 1.3,
+                label=label)
+    ax.set_xlabel("Ux (m/s)", fontsize=13)
+    ax.set_ylabel("y (m)", fontsize=13)
+    ax.set_title(f"Velocity Profile Convergence – Ux vs y  [x = 1 m, {model_name}]", fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, linestyle="--", alpha=0.5, which="both")
+    ax.set_xlim(0, 1.05 * u_max)
+    ax.set_ylim(0, y_max)
+    fig.tight_layout()
+
+    conv_dir = os.path.join(output_path, "convergence_plots")
+    os.makedirs(conv_dir, exist_ok=True)
+    out_path = os.path.join(conv_dir, "plot_velocity_convergence.png")
+    fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"  Velocity evolution plot → {output_path}")
-    return output_path
+    print(f"  Velocity convergence plot → {out_path}")
+    return out_path
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -514,7 +447,7 @@ if __name__ == "__main__":
     print("=" * 60)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     base_path, case_name, run_case_dir, source_case_dir, results_root = \
-        resolve_case_paths(script_dir)
+        pp.resolve_case_paths(script_dir)
     print(f"run_case_dir   : {run_case_dir}")
     print(f"source_case_dir: {source_case_dir}")
     print(f"results_root   : {results_root}")
@@ -528,6 +461,12 @@ if __name__ == "__main__":
         print(f"Loaded theory data: {len(theory['u_plus'])} points")
     else:
         print(f"[warn] validation file not found: {validation_file}")
+    coles_file = os.path.join(source_case_dir, "_validation_data", "tmr_coles_upyp.dat")
+    coles = pp.read_numeric_rows(coles_file) if os.path.exists(coles_file) else None
+    if coles is not None:
+        print(f"Loaded Coles profile: {len(coles)} points")
+    else:
+        print(f"[warn] Coles profile not found: {coles_file}")
     # Discover model folders
     model_folders = []
     if os.path.isdir(run_case_dir):
@@ -538,7 +477,6 @@ if __name__ == "__main__":
     if not model_folders:
         print(f"[warn] no model folders found under {run_case_dir}")
     models_uplus = {}   # {model_name: DataFrame(u_plus, y_plus)}
-    models_probes = {}  # {model_name: DataFrame(time, Ux, Uy, Uz)}
     for model_name in sorted(model_folders):
         print(f"\n--- Model: {model_name} ---")
         case_folder  = os.path.join(run_case_dir, model_name)
@@ -555,43 +493,30 @@ if __name__ == "__main__":
             plot_residual_data(solver_path, output_path)
         # --- u+/y+ profile ---
         sample_base = os.path.join(case_folder, "postProcessing", "sampleUyPlus")
-        sample_dir  = latest_time_directory(sample_base)
+        sample_dir  = pp.latest_time_directory(sample_base)
         if sample_dir is None:
             print(f"  [warn] no sampleUyPlus output found – skipping profile for {model_name}")
             continue
         df_raw = parse_sample_profile(sample_dir)
         if df_raw is None or df_raw.empty:
             continue
-        df_prof, u_tau = compute_uplus_yplus(df_raw, mu=MU_LAM)
+        u_inf, nu, rho = pp.detect_case_parameters(case_folder)
+        print(f"  detected U_inf = {u_inf:g} m/s, nu = {nu:g} m²/s, rho = {rho:.6f} kg/m³")
+        df_prof, u_tau = compute_uplus_yplus(df_raw, nu, rho)
         models_uplus[model_name] = df_prof
-        
-        # --- Probes data ---
-        probes_base = os.path.join(case_folder, "postProcessing", "probes")
-        probes_dir = latest_time_directory(probes_base)
-        if probes_dir is not None:
-            df_probes = parse_probes_data(probes_dir)
-            if df_probes is not None:
-                models_probes[model_name] = df_probes
-            else:
-                print(f"  [warn] failed to parse probes data for {model_name}")
-        else:
-            print(f"  [warn] no probes output found for {model_name}")
+
+        # --- Per-model velocity convergence plot (sampleUyPlusConv snapshots) ---
+        plot_velocity_convergence(model_name, case_folder, output_path)
 
     # --- Combined u+/y+ validation plot ---
     if theory and models_uplus:
         val_dir = os.path.join(results_root, "validation")
         print(f"\nGenerating u+/y+ validation plot in {val_dir} …")
-        plot_uplus_yplus(theory, models_uplus, val_dir)
-        
+        plot_uplus_yplus(theory, models_uplus, val_dir, coles=coles)
+
         # --- Ux vs y profile plot ---
         print(f"Generating Ux vs y profile plot in {val_dir} …")
         plot_Ux_vs_y(models_uplus, val_dir)
-    
-    # --- Velocity evolution plot ---
-    if models_probes:
-        val_dir = os.path.join(results_root, "validation")
-        print(f"\nGenerating velocity evolution plot in {val_dir} …")
-        plot_velocity_evolution_at_points(models_probes, val_dir)
     else:
         if not theory:
             print("[warn] skipping u+/y+ plot – no theory data")

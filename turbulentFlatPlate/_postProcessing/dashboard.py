@@ -2,13 +2,17 @@
 dashboard.py – Static HTML results dashboard for the turbulentFlatPlate case.
 Adapted from the backwards_step_tut dashboard with the same lightbox, gallery,
 and log-rendering logic. The validation section shows the u+/y+ plot produced
-by postpro.py.
+by postpro.py and a dedicated Cf Validation section from cf_validation.py.
 """
+import csv
 import html
 # import os
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
+
+import _pp_common as pp
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
 # ---------------------------------------------------------------------------
 # Lightbox  (identical to backwards_step_tut)
@@ -119,28 +123,6 @@ LIGHTBOX_JS = """
 </script>
 """
 # ---------------------------------------------------------------------------
-# Path resolution  (shared with postpro.py)
-# ---------------------------------------------------------------------------
-def resolve_case_paths(script_dir: Path):
-    if script_dir.name == "_postProcessing":
-        source_case_dir = script_dir.parent
-        case_name       = source_case_dir.name
-        base_path       = source_case_dir.parent
-        run_case_dir    = base_path / "run" / case_name
-    else:
-        case_name    = script_dir.name
-        parent       = script_dir.parent
-        if parent.name == "run":
-            base_path       = parent.parent
-            run_case_dir    = script_dir
-            source_case_dir = base_path / case_name
-        else:
-            base_path       = parent
-            run_case_dir    = base_path / "run" / case_name
-            source_case_dir = script_dir
-    results_root = base_path / "results" / case_name
-    return base_path, case_name, run_case_dir, source_case_dir, results_root
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def natural_key(s):
@@ -155,13 +137,6 @@ def image_files(directory: Path):
     return sorted(
         [p for p in directory.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS],
         key=lambda p: p.name.lower(),
-    )
-def recursive_image_files(directory: Path):
-    if not directory.is_dir():
-        return []
-    return sorted(
-        [p for p in directory.rglob("*") if p.suffix.lower() in IMAGE_EXTENSIONS],
-        key=lambda p: str(p).lower(),
     )
 def log_files(directory: Path):
     if not directory or not directory.is_dir():
@@ -226,26 +201,72 @@ def render_model_summary(models, run_case_dir: Path, results_root: Path):
 # ---------------------------------------------------------------------------
 # Dashboard builder
 # ---------------------------------------------------------------------------
+def render_cf_section(cf_plot, val_dir: Path, results_root: Path):
+    if cf_plot is None:
+        return ('<p class="empty">No Cf validation plot found – '
+                "run cf_validation.py first.</p>")
+    parts = [
+        f'<p><img src="{img_src(cf_plot, results_root)}" alt="Cf validation" '
+        'style="max-width:100%;"></p>'
+    ]
+    csv_path = val_dir / "cf_validation.csv"
+    if csv_path.is_file():
+        columns = ("model", "station_x", "cf_station", "cf_tmr",
+                   "ref_error_pct", "yp_min", "yp_max", "log_rms", "log_max")
+        labels = {"model": "Model", "station_x": "x [m]", "cf_station": "Cf",
+                  "cf_tmr": "Cf (TMR)", "ref_error_pct": "err [%]",
+                  "yp_min": "y⁺ min", "yp_max": "y⁺ max",
+                  "log_rms": "log-law RMS", "log_max": "log-law max"}
+        with open(csv_path, newline="") as stream:
+            rows = list(csv.reader(stream))
+        if len(rows) >= 2:
+            header = rows[0]
+            idx = {name: header.index(name) for name in columns if name in header}
+            if idx:
+                th = "".join(f"<th>{labels[c]}</th>" for c in columns if c in idx)
+                trs = []
+                for row in rows[1:]:
+                    tds = "".join(
+                        f"<td>{html.escape(row[i])}</td>"
+                        for c, i in idx.items() if i < len(row)
+                    )
+                    trs.append(f"<tr>{tds}</tr>")
+                parts.append(f"<table><tr>{th}</tr>{''.join(trs)}</table>")
+    links = []
+    for name in ("cf_validation.csv", "cf_validation.txt"):
+        p = val_dir / name
+        if p.is_file():
+            rel = quote(str(p.relative_to(results_root)).replace("\\", "/"))
+            links.append(f'<li><a href="{rel}">{html.escape(name)}</a></li>')
+    if links:
+        parts.append(f'<ul class="links">{"".join(links)}</ul>')
+    return "".join(parts)
+
 def build_dashboard(case_name, run_case_dir: Path, results_root: Path):
     models       = model_names(run_case_dir, results_root)
     val_dir      = results_root / "validation"
-    all_images   = recursive_image_files(results_root)
     all_logs_run = log_files(run_case_dir)
     generated_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     # Collect validation images (u+/y+ plot)
     val_images = image_files(val_dir)
-    # Separate the Ux vs y plot from other validation images
+    # Separate the individual validation figures from the gallery
     ux_y_plot = None
-    velocity_plot = None
+    cf_plot = None
     remaining_images = []
     for img in val_images:
         if "plot_Ux_vs_y" in img.name:
             ux_y_plot = img
-        elif "velocity_evolution" in img.name:
-            velocity_plot = img
+        elif "cf_validation" in img.name:
+            cf_plot = img
         else:
             remaining_images.append(img)
     val_images = remaining_images
+    per_model_plots = sum(
+        len(image_files(results_root / m / "convergence_plots")) for m in models
+    )
+    n_plots = (len(val_images) + per_model_plots
+               + (1 if ux_y_plot else 0)
+               + (1 if cf_plot else 0))
     # Per-model sections
     model_sections = []
     for model in models:
@@ -321,12 +342,13 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
   <div class="meta">
     <span class="pill">Generated: {html.escape(generated_at)}</span>
     <span class="pill">Models: {len(models)}</span>
-    <span class="pill">Plots: {len(all_images)}</span>
+    <span class="pill">Plots: {n_plots}</span>
     <span class="pill">Logs: {len(all_logs_run)}</span>
   </div>
   <nav>
     <a href="#summary">Summary</a>
     <a href="#validation">u⁺/y⁺ Validation</a>
+    <a href="#cf">Cf Validation</a>
     <a href="#models">Models</a>
     <a href="#logs">Logs</a>
   </nav>
@@ -345,8 +367,10 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
     {render_gallery(val_images, results_root, "No validation plot found – run postpro.py first.")}
     {f'<h2>Velocity Profile – Ux vs y</h2>' if ux_y_plot else ''}
     {f'<p><img src="{img_src(ux_y_plot, results_root)}" alt="Ux vs y Profile" style="max-width:100%;">' if ux_y_plot else ''}
-    {f'<h2>Velocity Evolution at Probe Points</h2>' if velocity_plot else ''}
-    {f'<p><img src="{img_src(velocity_plot, results_root)}" alt="Velocity Evolution" style="max-width:100%;">' if velocity_plot else ''}
+  </section>
+  <section id="cf">
+    <h2>Cf Validation  <small style="color:var(--muted);font-size:14px;">station x = 0.97008 vs. TMR reference</small></h2>
+    {render_cf_section(cf_plot, val_dir, results_root)}
   </section>
   <section id="models">
     <h2>Models</h2>
@@ -367,9 +391,8 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    # import re  # needed for natural_key inside this scope
     script_dir = Path(__file__).resolve().parent
-    _, case_name, run_case_dir, _, results_root = resolve_case_paths(script_dir)
+    _, case_name, run_case_dir, _, results_root = pp.resolve_case_paths(script_dir)
     results_root.mkdir(parents=True, exist_ok=True)
     html_content = build_dashboard(case_name, run_case_dir, results_root)
     out_file = results_root / "index.html"

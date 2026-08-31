@@ -3,16 +3,32 @@ cd "${0%/*}" || exit                                # Run from this directory
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
 #------------------------------------------------------------------------------
 
+logLink()
+{
+    echo "  [done] ${1#log.} -> $PWD/$1"
+}
+
 restore0Dir
 
-rm log.*
+rm -f log.*
 
-runApplication blockMesh
-runApplication decomposePar
-runParallel simpleFoam
-runApplication reconstructPar -latestTime
+runApplication blockMesh || exit 1
+logLink log.blockMesh
 
-runApplication checkMesh -writeAllFields -latestTime -allTopology -allGeometry
+runApplication decomposePar || exit 1
+logLink log.decomposePar
+
+runParallel rhoSimpleFoam || exit 1
+logLink log.rhoSimpleFoam
+
+runApplication reconstructPar -latestTime || exit 1
+logLink log.reconstructPar
+
+# All sampling runs in-solve via the controlDict function objects
+# (sampleUyPlus, samplePlate, sampleProfile, yPlus_reference_2, ...)
+
+runApplication checkMesh -writeAllFields -latestTime -allTopology -allGeometry || exit 1
+logLink log.checkMesh
 
 # source $FOAM_RUN/.venv/bin/activate
 # python3 postpro.py

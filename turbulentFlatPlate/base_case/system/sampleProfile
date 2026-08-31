@@ -1,0 +1,40 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      sampleProfile;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Samples the U profile on one wall-normal line at x = 0.97008, mirroring
+// the sampling setup of the flat_plate_andre_v2 comparison.
+// Runs during the solve (included via #includeFunc in controlDict),
+// writes at end:  postProcessing/sampleProfile/<endTime>/
+
+type                sets;
+libs                (sampling);
+writeControl        onEnd;
+setFormat           raw;
+interpolationScheme cellPoint;
+fields              (U);
+
+sets
+{
+    x_0p97008
+    {
+        type    face;
+        axis    y;
+        start   (0.97008 1e-10 0.05);
+        end     (0.97008 0.10 0.05);
+    }
+}
+
+// ************************************************************************* //
