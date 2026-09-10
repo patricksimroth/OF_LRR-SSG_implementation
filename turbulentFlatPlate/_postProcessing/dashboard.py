@@ -252,10 +252,13 @@ def build_dashboard(case_name, run_case_dir: Path, results_root: Path):
     # Separate the individual validation figures from the gallery
     ux_y_plot = None
     cf_plot = None
+    yplus_plot = None
     remaining_images = []
     for img in val_images:
         if "plot_Ux_vs_y" in img.name:
             ux_y_plot = img
+        elif "yplus_validation" in img.name:
+            yplus_plot = img
         elif "cf_validation" in img.name:
             cf_plot = img
         else:
@@ -266,7 +269,8 @@ def build_dashboard(case_name, run_case_dir: Path, results_root: Path):
     )
     n_plots = (len(val_images) + per_model_plots
                + (1 if ux_y_plot else 0)
-               + (1 if cf_plot else 0))
+               + (1 if cf_plot else 0)
+               + (1 if yplus_plot else 0))
     # Per-model sections
     model_sections = []
     for model in models:
@@ -349,6 +353,7 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
     <a href="#summary">Summary</a>
     <a href="#validation">u⁺/y⁺ Validation</a>
     <a href="#cf">Cf Validation</a>
+    <a href="#yplus">Wall y⁺</a>
     <a href="#models">Models</a>
     <a href="#logs">Logs</a>
   </nav>
@@ -371,6 +376,14 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
   <section id="cf">
     <h2>Cf Validation  <small style="color:var(--muted);font-size:14px;">station x = 0.97008 vs. TMR reference</small></h2>
     {render_cf_section(cf_plot, val_dir, results_root)}
+  </section>
+  <section id="yplus">
+    <h2>Wall y⁺ along the plate  <small style="color:var(--muted);font-size:14px;">all models, log scale</small></h2>
+    <p style="color:var(--muted);font-size:13px;">
+      Sampled wall y⁺ on the bottomWall patch (y⁺_reference_2 / samplePlate) versus x for every model.
+      Reference lines: y⁺&nbsp;=&nbsp;1 (wall-resolved) and y⁺&nbsp;=&nbsp;30 (wall-function range).
+    </p>
+    {f'<p><img src="{img_src(yplus_plot, results_root)}" alt="Wall y+ along the plate" style="max-width:100%;"></p>' if yplus_plot else '<p class="empty">No wall y+ plot found – run cf_validation.py first.</p>'}
   </section>
   <section id="models">
     <h2>Models</h2>

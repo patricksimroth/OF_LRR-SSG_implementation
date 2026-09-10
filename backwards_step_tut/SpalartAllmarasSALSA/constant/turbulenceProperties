@@ -1,0 +1,34 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      turbulenceProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+simulationType      RAS;
+
+RAS
+{
+    RASModel        SpalartAllmarasSALSA;
+
+    turbulence      on;
+    printCoeffs     on;
+
+    useRmod             true;       // Edward's modification
+    useSmod             true;       // strain rate instead of vorticity for Stilda
+
+    // required for useRmod true
+    rhoInf          1.2917;
+}
+
+
+// ************************************************************************* //

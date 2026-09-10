@@ -19,6 +19,7 @@ application     rhoSimpleFoam;
 libs
 (
     "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SSGLRROmega2019/lib/libSSGLRROmega2019Compressible.so"
+    "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SpalartAllmarasSALSA/lib/libSpalartAllmarasSALSACompressible.so"
 );
 
 startFrom       startTime;
@@ -27,7 +28,7 @@ startTime       0;
 
 stopAt          endTime;
 
-endTime         20000;
+endTime         2000;
 
 deltaT          1;
 
@@ -196,7 +197,7 @@ functions
                 tolerance       1e-6;
                 window          300;
                 windowType      exact;
-                nIterStartUp    2000;
+                nIterStartUp    3000;
             }
         }
         satisfiedAction end;

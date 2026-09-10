@@ -34,7 +34,7 @@ divSchemes
     // div(phi,p)      bounded Gauss upwind;
     div(phi,p)      bounded Gauss linear;
     
-    // div(phi,nuTilda)  bounded Gauss limitedLinear 1; //SA
+    div(phi,nuTilda)  bounded Gauss limitedLinear 1; //SA
 
     div(phi,e)          bounded Gauss linear;
     div(R)              Gauss linear;		//simpleFoam

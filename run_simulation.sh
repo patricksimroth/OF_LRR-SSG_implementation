@@ -60,6 +60,17 @@ if [ -d "src/SSGLRROmega2019" ]; then
     (cd src/SSGLRROmega2019 && wmake libso) || echo "  [warn] custom model build failed"
 fi
 
+# 1c. Build the custom SALSA turbulence model library (if source present)
+if [ -d "src/SpalartAllmarasSALSA" ]; then
+    echo "=========================================="
+    echo "Building custom turbulence model (SpalartAllmarasSALSA)..."
+    echo "=========================================="
+    if [ -z "$WM_PROJECT_DIR" ]; then
+        source /usr/lib/openfoam/openfoam2512/etc/bashrc
+    fi
+    (cd src/SpalartAllmarasSALSA && wmake libso) || echo "  [warn] custom model build failed"
+fi
+
 # 2. Find all directories at the root level
 for case_dir in *; do
     # Skip excluded directories (not simulation cases)

@@ -74,6 +74,7 @@ DISPLAY_NAME = {
     "kOmegaSST": "k-omega SST",
     "kOmegaSST_andre": "k-omega SST (andre)",
     "SSGLRROmega2019": "SSG/LRR-omega 2019 (SD)",
+    "SpalartAllmarasSALSA": "SA SALSA",
 }
 
 # Markers per model for the combined plot (chosen to be readable in print).
@@ -84,6 +85,7 @@ MODEL_MARKERS = {
     "kOmegaSST": "^",
     "kOmegaSST_andre": "v",
     "SSGLRROmega2019": "P",
+    "SpalartAllmarasSALSA": "*",
 }
 
 # Colours per model for the combined plot.
@@ -94,6 +96,7 @@ MODEL_COLORS = {
     "kOmegaSST": "tab:red",
     "kOmegaSST_andre": "tab:purple",
     "SSGLRROmega2019": "tab:brown",
+    "SpalartAllmarasSALSA": "tab:cyan",
 }
 
 
@@ -249,9 +252,11 @@ def process_model(model_name, case_dir, references, ref_station_x=REF_STATION_X)
     if yp_path is not None:
         yp = pp.read_numeric_rows(yp_path)
         if yp is not None:
-            yp_sorted = yp[np.argsort(yp[:, 0]), 3]
-            record["yp_min"] = float(yp_sorted.min())
-            record["yp_max"] = float(yp_sorted.max())
+            order_y = np.argsort(yp[:, 0])
+            record["yp_x"] = yp[order_y, 0]
+            record["yp"] = yp[order_y, 3]
+            record["yp_min"] = float(record["yp"].min())
+            record["yp_max"] = float(record["yp"].max())
             record["yp_source"] = os.path.relpath(yp_path, case_dir)
 
     # Reference-data error: only meaningful if a TMR reference is available
@@ -354,6 +359,61 @@ def plot_cf_combined(records, references, output_path, ref_station_x=REF_STATION
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
     print(f"  Cf plot     -> {output_path}")
+
+
+def plot_yplus_combined(records, output_path):
+    """Single wall-y+-versus-x plot with every model overlaid.
+
+    Uses the same sampled ``yPlus_bottomWall.raw`` data as the summary
+    table (``yPlus_reference_2``, falling back to ``samplePlate``).  The
+    y-axis is logarithmic because the model matrix spans wall-resolved
+    (y+ < 1) and wall-function (y+ > 30) meshes simultaneously.
+    """
+    fig, ax = plt.subplots(figsize=(9.5, 5.5))
+    plotted_any = False
+    yp_all = []
+    for record in records:
+        if record is None or "yp_x" not in record:
+            continue
+        marker = MODEL_MARKERS.get(record["model"], "o")
+        color = MODEL_COLORS.get(record["model"], "k")
+        # Keep only the physically meaningful domain (skip leading edge spike).
+        mask = (record["yp_x"] >= 0.05) & (record["yp_x"] <= 1.95)
+        if not mask.any():
+            continue
+        yp_all.append(record["yp"][mask])
+        ax.plot(record["yp_x"][mask], record["yp"][mask],
+                color=color, marker=marker, markersize=3.5,
+                markevery=max(1, mask.sum() // 25),
+                linewidth=1.2, label=record["display"])
+        plotted_any = True
+
+    if plotted_any:
+        ax.set_yscale("log")
+        # Automatic y range from the model data only, so the reference lines
+        # cannot stretch the axis into empty regions.
+        yp_cat = np.concatenate(yp_all)
+        yp_cat = yp_cat[yp_cat > 0]
+        if yp_cat.size:
+            ax.set_ylim(yp_cat.min() / 1.5, yp_cat.max() * 1.5)
+            # Mesh-regime reference lines: y+ = 1 (viscous sublayer
+            # resolution) and y+ = 30 (log-law wall-function range), drawn
+            # only when they fall inside the data range.
+            for y_ref, style, label in ((1.0, "--", r"$y^+ = 1$"),
+                                        (30.0, ":", r"$y^+ = 30$")):
+                if yp_cat.min() <= y_ref <= yp_cat.max():
+                    ax.axhline(y_ref, color="grey", linestyle=style,
+                               linewidth=0.8, alpha=0.55, label=label)
+
+    ax.set_xlabel(r"$x$  [m]")
+    ax.set_ylabel(r"$y^+$")
+    ax.set_title("Wall y+ along the plate – all models")
+    ax.grid(True, alpha=0.3, which="both")
+    ax.legend(loc="best", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+    print(f"  y+ plot     -> {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +540,7 @@ def main():
 
     plot_cf_combined(records, references,
                      os.path.join(out_dir, "cf_validation.png"))
+    plot_yplus_combined(records, os.path.join(out_dir, "yplus_validation.png"))
     write_summary_csv(records, os.path.join(out_dir, "cf_validation.csv"))
     summary_lines = write_summary_txt(records, os.path.join(out_dir, "cf_validation.txt"))
     print("\n" + "\n".join(summary_lines))

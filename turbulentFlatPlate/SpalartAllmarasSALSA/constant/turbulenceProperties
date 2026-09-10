@@ -3,7 +3,7 @@
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
 |  \\    /   O peration     | Version:  v2512                                 |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\/     M anipulation  |                                                 |
+|    \\/     M anipulation |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
@@ -18,11 +18,16 @@ simulationType      RAS;
 
 RAS
 {
-    RASModel        SpalartAllmaras;
+    RASModel        SpalartAllmarasSALSA;
 
     turbulence      on;
-
     printCoeffs     on;
+
+    useRmod             true;       // Edward's modification
+    useSmod             true;       // strain rate instead of vorticity for Stilda
+
+    // required for useRmod true
+    rhoInf          1.2745;
 }
 
 

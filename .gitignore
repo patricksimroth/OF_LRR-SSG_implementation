@@ -1,6 +1,7 @@
 results*/
 run/
 
+documentation/
 **/Make/*/
 *.o
 *.so

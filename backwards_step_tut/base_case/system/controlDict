@@ -23,6 +23,12 @@ y_ref           #eval "4.5*$h";
 
 application     rhoSimpleFoam;
 
+libs
+(
+    "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SSGLRROmega2019/lib/libSSGLRROmega2019Compressible.so"
+    "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SpalartAllmarasSALSA/lib/libSpalartAllmarasSALSACompressible.so"
+);
+
 startFrom       startTime;
 
 startTime       0;
