@@ -13,6 +13,9 @@ format_time() {
     printf "%02d:%02d:%02d" "$hours" "$minutes" "$seconds"
 }
 
+# Root-level directories that are not simulation cases (extend as needed)
+EXCLUDED_DIRS=("run" "results" "src" "documentation")
+
 # Parse command-line filters
 RUN_ALL=true
 script_start=$(date +%s)
@@ -59,8 +62,20 @@ fi
 
 # 2. Find all directories at the root level
 for case_dir in *; do
-    # Ensure it's a directory and not run, results, or another file
-    if [ -d "$case_dir" ] && [ "$case_dir" != "run" ] && [ "$case_dir" != "results" ]; then
+    # Skip excluded directories (not simulation cases)
+    is_excluded=false
+    for excluded_dir in "${EXCLUDED_DIRS[@]}"; do
+        if [ "$case_dir" == "$excluded_dir" ]; then
+            is_excluded=true
+            break
+        fi
+    done
+    if [ "$is_excluded" = true ]; then
+        continue
+    fi
+
+    # Ensure it's a directory
+    if [ -d "$case_dir" ]; then
         
         # Check if the base_case folder exists before proceeding
         if [ ! -d "$case_dir/base_case" ]; then

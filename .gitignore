@@ -1,5 +1,11 @@
 results*/
 run/
+
+**/Make/*/
+*.o
+*.so
+*.dep
+lnInclude/
 __pycache__/
 polyMesh_tmr/
 .git/
