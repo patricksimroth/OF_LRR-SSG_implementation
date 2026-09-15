@@ -1,0 +1,27 @@
+# Study: structured blockMesh baseline sweep (example of the config schema).
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/example_blockMesh [--mesh-only|--dry-run]
+#
+# models    : turbulence model overlays from <case>/<model>/
+# approach  : mesh generator from <case>/meshing/approaches/
+# [params]  : scalar = fixed, list = swept (cartesian product),
+#             [[params.sets]] = explicit parameter combinations (one per set)
+# Run dirs  : run/<case>/<model>__<tag>, tag = approach name plus every param
+#             that deviates from the approach defaults.
+# The runner wipes run/<case> at the start (same ephemeral convention as
+# run_simulation.sh).
+
+models = ["kOmegaSST", "SSGLRROmega2019", "SpalartAllmarasSALSA"]
+approach = "blockMesh"
+
+[params]
+n_y = 193
+n_x = 113
+n_x_symmetry = 24
+
+[[params.sets]]
+GRADING = 50000
+
+
+[[params.sets]]
+GRADING = 1000

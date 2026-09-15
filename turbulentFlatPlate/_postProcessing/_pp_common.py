@@ -8,6 +8,7 @@ starts with an underscore.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -60,6 +61,20 @@ def latest_time_directory(parent):
         except ValueError:
             pass
     return max(candidates, key=lambda x: x[0])[1] if candidates else None
+
+
+# ---------------------------------------------------------------------------
+# Study manifest (config-driven runs, see <case>/meshing/run_study.py)
+# ---------------------------------------------------------------------------
+def load_manifest(run_case_dir):
+    """Parsed study_manifest.json of a run case dir, or None if absent."""
+    path = Path(run_case_dir) / "study_manifest.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
 
 
 # ---------------------------------------------------------------------------

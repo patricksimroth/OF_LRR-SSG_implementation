@@ -12,8 +12,12 @@ restore0Dir
 
 rm -f log.*
 
-runApplication blockMesh || exit 1
-logLink log.blockMesh
+if [ -d constant/polyMesh ]; then
+    echo "  [skip] blockMesh (polyMesh pre-generated)"
+else
+    runApplication blockMesh || exit 1
+    logLink log.blockMesh
+fi
 
 runApplication decomposePar || exit 1
 logLink log.decomposePar

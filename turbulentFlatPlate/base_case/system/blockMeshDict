@@ -27,6 +27,8 @@ n_y 193;
 n_x 113;
 n_x_symmetry 24;
 
+#includeIfPresent "meshParams";
+
 
 vertices
 (

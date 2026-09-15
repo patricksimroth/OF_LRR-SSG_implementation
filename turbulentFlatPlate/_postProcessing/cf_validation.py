@@ -100,6 +100,20 @@ MODEL_COLORS = {
 }
 
 
+def assign_plot_styles(models):
+    """(color, marker) per model: static registry first, tab10 cycle for
+    names without a registry entry (study combos, e.g. kOmegaSST__blockMesh_*)."""
+    colors = dict(MODEL_COLORS)
+    markers = dict(MODEL_MARKERS)
+    extra = sorted(set(models) - set(colors))
+    cmap = plt.get_cmap("tab10")
+    marker_cycle = ("o", "s", "^", "D", "v", "P", "X", "*", "<", ">")
+    for i, name in enumerate(extra):
+        colors[name] = cmap(i % cmap.N)
+        markers[name] = marker_cycle[i % len(marker_cycle)]
+    return colors, markers
+
+
 # ---------------------------------------------------------------------------
 # Reference data parsing (Techplot .dat format used by the TMR repository)
 # ---------------------------------------------------------------------------
@@ -311,12 +325,14 @@ def plot_cf_combined(records, references, output_path, ref_station_x=REF_STATION
     here collapsing the row of subplots into a single comparison plot.
     """
     fig, ax = plt.subplots(figsize=(9.5, 5.5))
+    colors, markers = assign_plot_styles(
+        r["model"] for r in records if r is not None)
     plotted_any = False
     for record in records:
         if record is None or "x" not in record:
             continue
-        marker = MODEL_MARKERS.get(record["model"], "o")
-        color = MODEL_COLORS.get(record["model"], "k")
+        marker = markers.get(record["model"], "o")
+        color = colors.get(record["model"], "k")
         # Keep only the physically meaningful domain (skip leading edge spike).
         mask = (record["x"] >= 0.05) & (record["x"] <= 1.95)
         ax.plot(record["x"][mask], record["cf"][mask],
@@ -344,7 +360,7 @@ def plot_cf_combined(records, references, output_path, ref_station_x=REF_STATION
         for record in records:
             if record is None or "station_x" not in record:
                 continue
-            color = MODEL_COLORS.get(record["model"], "k")
+            color = colors.get(record["model"], "k")
             ax.axvline(record["station_x"], color=color, alpha=0.10, linewidth=0.6)
         ax.axvline(ref_station_x, color="grey", alpha=0.25,
                    linewidth=0.8, linestyle=":",
@@ -370,13 +386,15 @@ def plot_yplus_combined(records, output_path):
     (y+ < 1) and wall-function (y+ > 30) meshes simultaneously.
     """
     fig, ax = plt.subplots(figsize=(9.5, 5.5))
+    colors, markers = assign_plot_styles(
+        r["model"] for r in records if r is not None)
     plotted_any = False
     yp_all = []
     for record in records:
         if record is None or "yp_x" not in record:
             continue
-        marker = MODEL_MARKERS.get(record["model"], "o")
-        color = MODEL_COLORS.get(record["model"], "k")
+        marker = markers.get(record["model"], "o")
+        color = colors.get(record["model"], "k")
         # Keep only the physically meaningful domain (skip leading edge spike).
         mask = (record["yp_x"] >= 0.05) & (record["yp_x"] <= 1.95)
         if not mask.any():
