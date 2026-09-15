@@ -1,0 +1,55 @@
+# Study: all four meshing approaches, same model, same case, same solver.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/compare_approaches
+#        ./run_study.sh turbulentFlatPlate/studies/compare_approaches --dry-run
+#        ./run_study.sh turbulentFlatPlate/studies/compare_approaches --approaches snappy,gmshTri
+#
+#   blockMesh -> structured hex, wall-resolved core, no prism layers
+#   snappy    -> snappyHexMesh over the whole domain: background cubes, octree
+#                refinement toward the plate, snap, prism layers
+#   gmshTri   -> unstructured triangular core + snappyHexMesh prism layers
+#   gmshHex   -> that core's hexagon-dominant polygonal dual (polyDualMesh)
+#                + snappyHexMesh prism layers
+#
+# [params] is shared; a [params.<approach>] sub-table overrides it for that one
+# and may only name that approach's own parameters.  Each approach sizes its
+# core its own way (blockMesh grading, snappy octree refinement, gmsh size
+# fields), so the core controls live in per-approach blocks.
+#
+# The three prism-adding approaches share ONE stack, set in [params]: 40
+# layers, first layer 1e-6 m (y+ ~0.1), overall height 0.015 m; the expansion
+# ratio (~1.225) is derived from them.  blockMesh has no prisms but takes
+# firstLayerThickness too: its wall-normal GRADING is derived from it so the
+# wall cell (and wall y+) matches the prism stack.
+#
+# Prerequisite for gmshTri/gmshHex: gmsh in the project venv
+
+models = ["SSGLRROmega2019"]
+approach = ["blockMesh", "snappy", "gmshTri", "gmshHex"]
+
+[params]
+nPrisms = 40
+firstLayerThickness = 1.0e-06
+totalLayerThickness = 0.015
+
+[params.blockMesh]
+n_y = 193
+n_x = 113
+n_x_symmetry = 24
+
+[params.snappy]
+backgroundCellSize = 0.025   # background cubes; snappy refines them toward the plate
+wallLevel = 2                # octree level within refineDistance (6.25 mm cells)
+refineDistance = 0.1         # one level coarser per 3x that distance
+
+[params.gmshTri]
+wallCellSize = 0.004    # isotropic core size at the plate, relaxing to farCellSize
+farCellSize = 0.06
+distMin = 0.01
+distMax = 0.4
+
+[params.gmshHex]
+wallCellSize = 0.004
+farCellSize = 0.06
+distMin = 0.01
+distMax = 0.4

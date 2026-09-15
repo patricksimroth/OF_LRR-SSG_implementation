@@ -32,6 +32,21 @@ if [ $# -gt 0 ]; then
 fi
 
 # 1. Clean up the 'run' directory at the start
+# Refuse if a config-driven study owns run/ right now: wiping it would delete
+# that study's case directories mid-solve and it would then fail on missing
+# paths.  See turbulentFlatPlate/meshing/run_study.py (acquire_lock).
+for study_lock in run/.*.study.lock; do
+    [ -e "$study_lock" ] || continue
+    lock_pid=$(head -1 "$study_lock" 2>/dev/null)
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+        echo "[error] a study (pid $lock_pid) is running and owns run/."
+        echo "        Wiping run/ now would destroy it mid-solve."
+        echo "        Wait for it to finish, or remove $study_lock if that process is gone."
+        exit 1
+    fi
+    rm -f "$study_lock"
+done
+
 echo "=========================================="
 echo "Cleaning up the 'run' and 'results' directory..."
 echo "=========================================="
