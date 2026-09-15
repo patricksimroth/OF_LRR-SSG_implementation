@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -192,3 +193,44 @@ def detect_case_parameters(case_dir, fallback_u_inf=69.4, fallback_nu=1.388e-05)
     if rho is None:
         rho = 1.0
     return u_inf, nu, rho
+
+
+# ---------------------------------------------------------------------------
+# ParaView pvbatch helpers (field_images.py, bl_thickness.py)
+# ---------------------------------------------------------------------------
+def find_pvbatch():
+    """pvbatch executable: $PARAVIEW_PVBATCH, `pvbatch` on PATH, newest
+    ~/opt/ParaView-*/bin/pvbatch (Kitware Linux binary); None if absent."""
+    env = os.environ.get("PARAVIEW_PVBATCH")
+    if env:
+        return env if Path(env).is_file() else None
+    on_path = shutil.which("pvbatch")
+    if on_path:
+        return on_path
+    installs = sorted(Path.home().glob("opt/ParaView-*/bin/pvbatch"))
+    return str(installs[-1]) if installs else None
+
+
+def pvbatch_env():
+    """Environment for pvbatch: it ships its own Python and libraries, so the
+    OpenFOAM/venv variables of the drivers must not leak into it."""
+    return {k: v for k, v in os.environ.items()
+            if k not in ("LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME")}
+
+
+def solved_run_dirs(run_case_dir):
+    """(run dir, latest time dir) for run dirs under run_case_dir with a
+    controlDict and a reconstructed latest time holding p."""
+    run_case_dir = Path(run_case_dir)
+    if not run_case_dir.is_dir():
+        return []
+    found = []
+    for item in sorted(run_case_dir.iterdir()):
+        if not item.is_dir() or item.name.startswith("_"):
+            continue
+        if not (item / "system" / "controlDict").is_file():
+            continue
+        latest = latest_time_directory(item)
+        if latest is not None and (latest / "p").is_file():
+            found.append((item, latest))
+    return found

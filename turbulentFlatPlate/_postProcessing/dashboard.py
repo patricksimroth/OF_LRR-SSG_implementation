@@ -253,6 +253,7 @@ def build_dashboard(case_name, run_case_dir: Path, results_root: Path):
     ux_y_plot = None
     cf_plot = None
     yplus_plot = None
+    bl_plot = None
     remaining_images = []
     for img in val_images:
         if "plot_Ux_vs_y" in img.name:
@@ -261,24 +262,34 @@ def build_dashboard(case_name, run_case_dir: Path, results_root: Path):
             yplus_plot = img
         elif "cf_validation" in img.name:
             cf_plot = img
+        elif "delta99_comparison" in img.name:
+            bl_plot = img
         else:
             remaining_images.append(img)
     val_images = remaining_images
     per_model_plots = sum(
-        len(image_files(results_root / m / "convergence_plots")) for m in models
+        len(image_files(results_root / m / "convergence_plots"))
+        + len(image_files(results_root / m / "field_plots")) for m in models
     )
     n_plots = (len(val_images) + per_model_plots
                + (1 if ux_y_plot else 0)
                + (1 if cf_plot else 0)
-               + (1 if yplus_plot else 0))
+               + (1 if yplus_plot else 0)
+               + (1 if bl_plot else 0))
     # Per-model sections
     model_sections = []
     for model in models:
-        conv_images = image_files(results_root / model / "convergence_plots")
-        m_logs      = log_files(run_case_dir / model)
+        conv_images  = image_files(results_root / model / "convergence_plots")
+        field_images = image_files(results_root / model / "field_plots")
+        m_logs       = log_files(run_case_dir / model)
+        field_section = (
+            f"<h3>Field images (mesh overlaid)</h3>"
+            f"{render_gallery(field_images, results_root)}"
+        ) if field_images else ""
         model_sections.append(
             f'<section id="model-{html.escape(model)}">'
             f"<h2>{html.escape(model)}</h2>"
+            f"{field_section}"
             f"<h3>Convergence</h3>"
             f"{render_gallery(conv_images, results_root, 'No convergence plots found.')}"
             f"<h3>Logs</h3>"
@@ -354,6 +365,7 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
     <a href="#validation">u⁺/y⁺ Validation</a>
     <a href="#cf">Cf Validation</a>
     <a href="#yplus">Wall y⁺</a>
+    <a href="#delta99">Boundary-layer thickness</a>
     <a href="#models">Models</a>
     <a href="#logs">Logs</a>
   </nav>
@@ -384,6 +396,15 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
       Reference lines: y⁺&nbsp;=&nbsp;1 (wall-resolved) and y⁺&nbsp;=&nbsp;30 (wall-function range).
     </p>
     {f'<p><img src="{img_src(yplus_plot, results_root)}" alt="Wall y+ along the plate" style="max-width:100%;"></p>' if yplus_plot else '<p class="empty">No wall y+ plot found – run cf_validation.py first.</p>'}
+  </section>
+  <section id="delta99">
+    <h2>Boundary-layer thickness  <small style="color:var(--muted);font-size:14px;">δ₉₉ over x, all runs</small></h2>
+    <p style="color:var(--muted);font-size:13px;">
+      δ₉₉ = wall distance where Ux reaches 99&nbsp;% of the local edge velocity, compared to the
+      turbulent flat-plate correlation δ&nbsp;=&nbsp;0.37&nbsp;x&nbsp;/&nbsp;Re<sub>x</sub><sup>1/5</sup>;
+      dotted: prism-layer height of the meshes that have one.
+    </p>
+    {f'<p><img src="{img_src(bl_plot, results_root)}" alt="Boundary-layer thickness comparison" style="max-width:100%;"></p>' if bl_plot else '<p class="empty">No boundary-layer plot found – run bl_thickness.py first.</p>'}
   </section>
   <section id="models">
     <h2>Models</h2>

@@ -1,20 +1,42 @@
 // -*- C++ -*-
+// Wall-normal line profiles along the plate, y 0 -> 0.1 m at mid-depth z = 0.05.
+// x1_profile (x = 1 m) is the MAIN line: postpro.py reads it for u+/y+ and Ux-y
+// (glob x1_profile*.xy), so keep its name.  The other nine lines use the same
+// fields at x = 0.2 ... 1.95 m (x<int>p<frac>_profile).
+//
+// Fields that a model does not have are skipped with a warning (SA: k, omega,
+// R; kOmegaSST: nuTilda, R), so one list serves every model.  R is the
+// transported Reynolds stress (RSM); turbulenceProperties:R is the
+// turbulenceFields output available for every model.  Output files are named
+// after the fields actually sampled, ordered by type (scalars, vectors,
+// symmTensors) and alphabetically within a type, e.g.
+//   x1_profile_nut_rho_yPlus_U_wallShearStress_turbulenceProperties:R.xy
 
 type            sets;
 libs            (sampling);
 writeControl    onEnd;
 interpolationScheme cellPoint;
 setFormat       raw;
-fields          (rho yPlus U wallShearStress);
+fields          (rho yPlus U wallShearStress nut k omega R turbulenceProperties:R);
+
+profile
+{
+    type        face;
+    axis        y;
+    nPoints     1000;
+}
+
 sets
 {
-    x1_profile
-    {
-        type        face;
-        axis        y;
-        start       (1 0.0 0.05);
-        end         (1 0.1  0.05);
-        nPoints     1000;
-    }
+    x0p2_profile  { ${profile}; start (0.2  0.0 0.05); end (0.2  0.1 0.05); }
+    x0p4_profile  { ${profile}; start (0.4  0.0 0.05); end (0.4  0.1 0.05); }
+    x0p6_profile  { ${profile}; start (0.6  0.0 0.05); end (0.6  0.1 0.05); }
+    x0p8_profile  { ${profile}; start (0.8  0.0 0.05); end (0.8  0.1 0.05); }
+    x1_profile    { ${profile}; start (1    0.0 0.05); end (1    0.1 0.05); }   // main line
+    x1p2_profile  { ${profile}; start (1.2  0.0 0.05); end (1.2  0.1 0.05); }
+    x1p4_profile  { ${profile}; start (1.4  0.0 0.05); end (1.4  0.1 0.05); }
+    x1p6_profile  { ${profile}; start (1.6  0.0 0.05); end (1.6  0.1 0.05); }
+    x1p8_profile  { ${profile}; start (1.8  0.0 0.05); end (1.8  0.1 0.05); }
+    x1p95_profile { ${profile}; start (1.95 0.0 0.05); end (1.95 0.1 0.05); }
 }
 // ************************************************************************* //

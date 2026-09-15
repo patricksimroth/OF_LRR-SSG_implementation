@@ -141,40 +141,55 @@ def parse_theory_data(validation_file):
 # ---------------------------------------------------------------------------
 # Sample-file parser
 # ---------------------------------------------------------------------------
+# Columns per field token in a sets file name.  OpenFOAM orders the fields by
+# type (scalars, vectors, symmTensors), alphabetically within a type, and
+# skips fields the model does not have (e.g. k/omega for SA), so the column
+# layout differs per model and must come from the file name.
+_SYMM_TENSOR = ("xx", "xy", "xz", "yy", "yz", "zz")
+_PROFILE_FIELD_COLUMNS = {
+    "rho": ["rho"],
+    "yPlus": ["yPlus"],
+    "nut": ["nut"],
+    "nuTilda": ["nuTilda"],
+    "k": ["k"],
+    "omega": ["omega"],
+    "epsilon": ["epsilon"],
+    "U": ["Ux", "Uy", "Uz"],
+    "wallShearStress": ["tau_x", "tau_y", "tau_z"],
+    "R": [f"R_{c}" for c in _SYMM_TENSOR],                            # transported (RSM)
+    "turbulenceProperties:R": [f"R_tp_{c}" for c in _SYMM_TENSOR],   # turbulenceFields output
+}
+
+
 def _profile_columns_from_filename(file_path):
-    """Derive column names from an `x1_profile_<field>_<field>_..._.xy` filename.
+    """Derive column names from a `<set>_profile_<field>_<field>_....xy` filename
+    (sampleUyPlus / sampleUyPlusConv line sets, e.g. `x1_profile_...`).
 
     The sets function object names its output after the sampled fields.  The
     name is only trusted when it expands to the actual column count (checked
     by the caller).  Returns a list of column names or None.
     """
     base = os.path.basename(file_path)
-    prefix = "x1_profile_"
-    if not base.startswith(prefix) or not base.endswith(".xy"):
+    marker = "_profile_"
+    if marker not in base or not base.endswith(".xy"):
         return None
     cols = ["y"]
-    for token in base[len(prefix):-len(".xy")].split("_"):
-        if token == "rho":
-            cols.append("rho")
-        elif token == "yPlus":
-            cols.append("yPlus")
-        elif token == "U":
-            cols.extend(["Ux", "Uy", "Uz"])
-        elif token == "wallShearStress":
-            cols.extend(["tau_x", "tau_y", "tau_z"])
-        else:
+    for token in base.split(marker, 1)[1][:-len(".xy")].split("_"):
+        if token not in _PROFILE_FIELD_COLUMNS:
             return None
+        cols.extend(_PROFILE_FIELD_COLUMNS[token])
     return cols
 
 def parse_sample_profile(sample_dir):
     """
-    Find the x1_profile_*.xy file in *sample_dir* and return a DataFrame.
-    Columns are `y` followed by the `sampleUyPlus` fields in controlDict order
-    (`(rho yPlus U wallShearStress)`): 9 columns when the solver provides `rho`
-    (compressible), 8 when it does not (incompressible).
+    Find the main-line x1_profile_*.xy file in *sample_dir* and return a DataFrame.
+    Columns are `y` followed by the sampled fields in the order OpenFOAM writes
+    them (by type, alphabetical within a type; fields the model lacks are
+    absent), e.g. SA: nut, rho, yPlus, U, wallShearStress, turbulenceProperties:R.
     Column names come from the file name when it is in the
-    `x1_profile_<fields>.xy` pattern and matches the column count, otherwise
-    from the column count directly.
+    `<set>_profile_<fields>.xy` pattern and matches the column count, otherwise
+    from the column count directly (9 = with rho, 8 = without; the old
+    sampleUyPlusConv layout).
     """
     if not sample_dir or not os.path.isdir(sample_dir):
         return None
