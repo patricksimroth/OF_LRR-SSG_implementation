@@ -94,7 +94,7 @@ boundary
     }
     symmetry
     {
-        type symmetryPlane;
+        type patch;
         faces
         (
             (6 7 1 0)

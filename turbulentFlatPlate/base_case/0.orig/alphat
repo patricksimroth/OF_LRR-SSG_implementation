@@ -45,7 +45,7 @@ boundaryField
     }
     symmetry
     {
-        type            symmetryPlane;
+        type            slip;
     }
     bottomWall   
     {

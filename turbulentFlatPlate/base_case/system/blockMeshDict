@@ -16,7 +16,9 @@ FoamFile
 
 scale   0.333333333333333;
 
-GRADING 50000;
+// first cell 1e-6 m over 193 cells (= prism first layer of snappy/gmsh);
+// the blockMesh study approach derives this from firstLayerThickness
+GRADING 55290.55;
 // n_y 385;
 // n_x 449;
 // n_x_symmetry 96;
@@ -95,7 +97,7 @@ boundary
     }
     symmetry
     {
-        type symmetryPlane;
+        type patch;
         faces
         (
             (6 7 1 0)

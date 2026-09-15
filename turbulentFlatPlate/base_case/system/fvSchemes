@@ -36,7 +36,13 @@ divSchemes
     
     div(phi,nuTilda)  bounded Gauss limitedLinear 1; //SA
 
-    div(phi,e)          bounded Gauss linear;
+    // Bounded, NOT plain Gauss linear: the central scheme is fine on the
+    // orthogonal blockMesh but oscillates on the unstructured gmsh cores,
+    // driving sensible e down to -2.5e5 (absolute T below zero) so rho=p/(RT)
+    // inverts and the pressure solve dies around iteration 800-1000.
+    // With this, gmshTri/gmshHex converge to Ux ~1e-8 and e_min matches the
+    // blockMesh baseline (-8.46e4 vs -8.48e4).
+    div(phi,e)          bounded Gauss limitedLinear 1;
     div(R)              Gauss linear;		//simpleFoam
     div(phi,Ekp)        bounded Gauss linear;
     // turbulence          bounded Gauss limitedLinear 1;

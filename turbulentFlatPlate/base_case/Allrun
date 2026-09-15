@@ -28,6 +28,21 @@ logLink log.rhoSimpleFoam
 runApplication reconstructPar -latestTime || exit 1
 logLink log.reconstructPar
 
+# The final iteration's fields must exist after reconstruction.  They are only
+# written on a write step (endTime a multiple of writeInterval) or when the run
+# stops early via integralCfStop / residualControl (both writeAndEnd).
+latest=$(foamListTimes -latestTime 2>/dev/null | tail -1)
+missing=""
+for field in U p T; do
+    [ -f "$latest/$field" ] || missing="$missing $field"
+done
+if [ -z "$latest" ] || [ -n "$missing" ]; then
+    echo "[error] final time '${latest:-none}' is missing fields:${missing:- (no time dir)}"
+    echo "        make endTime a multiple of writeInterval in system/controlDict"
+    exit 1
+fi
+echo "  [done] final fields reconstructed at time $latest: $(ls "$latest" | tr '\n' ' ')"
+
 # All sampling runs in-solve via the controlDict function objects
 # (sampleUyPlus, samplePlate, sampleProfile, yPlus_reference_2, ...)
 

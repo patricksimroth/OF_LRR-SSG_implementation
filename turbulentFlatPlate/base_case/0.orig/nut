@@ -46,7 +46,7 @@ boundaryField
 
     symmetry
     {
-        type            symmetryPlane;
+        type            slip;
     }
 
     frontAndBack

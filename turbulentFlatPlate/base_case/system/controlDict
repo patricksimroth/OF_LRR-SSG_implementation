@@ -28,13 +28,13 @@ startTime       0;
 
 stopAt          endTime;
 
-endTime         2000;
+endTime         20000;
 
 deltaT          1;
 
 writeControl    timeStep;
 
-writeInterval   400;
+writeInterval   100;
 
 purgeWrite      1;
 
@@ -69,9 +69,12 @@ functions
         type            solverInfo;
         libs            (utilityFunctionObjects);
         fields          (U p e epsilon omega k);
-        // writeControl    onEnd;
-        writeInterval   timeStep;
-        writeResidualFields yes;
+        // Every step: postpro.py reads the residual history from solverInfo.dat.
+        // No residual fields - they create a time directory per iteration
+        // (~3000 dirs, several GB per case) that purgeWrite never removes.
+        writeControl    timeStep;
+        writeInterval   1;
+        writeResidualFields no;
     }
     
     turbulenceFields
@@ -79,14 +82,14 @@ functions
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
         fields          (R);
-        writeInterval   10;
+        writeControl    writeTime;
     }
 
     stressComponents
     {
         type            turbulenceFields;
         libs            (fieldFunctionObjects);
-        writeInterval   10;
+        writeControl    writeTime;
         fields          (R epsilon); //devRhoReff
     }
 
@@ -123,20 +126,6 @@ functions
 
     #includeFunc "sampleProfile"
 
-    yPlus_reference
-    {
-        type            probes;
-        libs            (fieldFunctionObjects);
-        fields          (yPlus U wallShearStress);
-        probeLocations
-        (
-            (1 0.0 0.05)
-        );
-        writeControl    timeStep;
-        writeInterval   10;
-        // interpolationScheme cellPoint;
-    }
-
     yPlus_reference_2
     {
         type            surfaces;
@@ -154,8 +143,9 @@ functions
                 // interpolate     true;
             }
         );
-        writeControl    timeStep;
-        writeInterval   10;
+        // Final time only: cf_validation.py reads just the latest time dir
+        // (every 10 iterations left ~300 dirs / 16 MB per run).
+        writeControl    onEnd;
     }
 
     integralCf
