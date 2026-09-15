@@ -1,0 +1,37 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      meshQualityDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Layer-addition quality limits for the gmsh cores.  maxConcave is fully open
+// because the polyDualMesh cells (gmshHex) are centroid duals and can be
+// geometrically concave while topologically valid; the finite-volume, skewness
+// and non-orthogonality limits are the ones that actually matter here.
+
+maxNonOrtho             80;
+maxBoundarySkewness     20;
+maxInternalSkewness     4;
+maxConcave              180;
+minVol                  -1;
+minTetQuality           -1;
+minArea                 -1;
+minTwist                -1;
+minDeterminant          -1;
+minFaceWeight           -1;
+minVolRatio             -1;
+minTriangleTwist        -1;
+nSmoothScale            4;
+errorReduction          0.75;
+
+// ************************************************************************* //

@@ -1,0 +1,40 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      extrudeMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// gmshHex only.  subsetMesh leaves a half-depth single layer of dual cells;
+// re-extruding its exposed `back` patch by the full depth restores the baseline
+// z-extent and guarantees exactly one front/back face per cell.
+
+constructFrom   patch;
+sourceCase      "@SOURCE_CASE@";
+sourcePatches   (back);
+exposedPatchName front;
+flipNormals     false;
+
+extrudeModel    plane;
+nLayers         1;
+expansionRatio  1;
+thickness       @DEPTH@;
+
+planeCoeffs
+{
+    thickness   @DEPTH@;
+}
+
+mergeFaces      false;
+mergeTol        0;
+
+// ************************************************************************* //

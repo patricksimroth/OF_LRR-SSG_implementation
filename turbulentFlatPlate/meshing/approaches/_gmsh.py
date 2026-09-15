@@ -1,0 +1,363 @@
+"""
+_gmsh.py – shared Gmsh -> OpenFOAM steps for the gmshTri / gmshHex approaches.
+
+Both approaches build the same graded triangular core with Gmsh and add the
+near-wall prism stack with snappyHexMesh in addLayers-only mode.  gmshHex
+inserts polyDualMesh in between, which replaces the triangles by their
+hexagon-dominant polygonal dual.
+
+    gmshTri:  write_geo -> run_gmsh -> gmsh_to_foam -> set_patch_types
+              -> add_prism_layers -> finalize
+    gmshHex:  write_geo -> run_gmsh -> gmsh_to_foam -> set_patch_types
+              -> dualize -> merge_front_back -> set_patch_types
+              -> add_prism_layers -> finalize
+
+Geometry and patch names mirror base_case/system/blockMeshDict so the result is
+a drop-in replacement for the blockMesh baseline: inlet, outlet, topWall,
+bottomWall (the plate, x >= 0), symmetry (upstream of the leading edge) and
+frontAndBack (empty).  The z extent must stay 0 .. depth because the sampling
+function objects probe the z = depth/2 mid-plane.
+
+Gmsh comes from the project venv (`pip install gmsh`).  It is invoked through
+the venv interpreter rather than the `gmsh` launcher on PATH: sourcing the
+OpenFOAM bashrc puts /usr/bin ahead of the venv, so the launcher's
+`#!/usr/bin/env python` shebang would pick the system python, which has no gmsh
+module.  LD_LIBRARY_PATH additionally has to cover the wheel's GL dependencies.
+"""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+from ..common import VENV_PYTHON, stack_expansion_ratio
+from .base import ApproachError
+
+TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+# Patch types the case fields in 0.orig expect (blockMeshDict boundary block).
+PATCH_TYPES = {
+    "frontAndBack": "empty",
+    "front": "empty",
+    "back": "empty",
+    "topWall": "wall",
+    "bottomWall": "wall",
+    "symmetry": "patch",
+    "inlet": "patch",
+    "outlet": "patch",
+}
+
+EXPECTED_PATCHES = frozenset(
+    ("inlet", "outlet", "topWall", "bottomWall", "symmetry", "frontAndBack")
+)
+
+
+# ---------------------------------------------------------------------------
+# Process helpers
+# ---------------------------------------------------------------------------
+def _run(cmd, cwd, log_name, env=None):
+    """Run cmd in cwd, stdout+stderr -> cwd/log_name, return the exit code."""
+    log_path = Path(cwd) / log_name
+    with open(log_path, "w") as log:
+        proc = subprocess.run(cmd, cwd=str(cwd), stdout=log,
+                              stderr=subprocess.STDOUT, env=env)
+    return proc.returncode
+
+
+def _foam(cmd, target, log_name, env=None):
+    """_run, but a non-zero exit aborts the combo with the log path named."""
+    rc = _run(cmd, target, log_name, env=env)
+    if rc != 0:
+        raise ApproachError(f"{cmd[0]} failed (rc={rc}), see {log_name}")
+
+
+def find_gmsh():
+    """(argv prefix, environment) for invoking gmsh."""
+    venv_bin = Path(VENV_PYTHON).parent
+    launcher = venv_bin / "gmsh"
+    if launcher.is_file() and Path(VENV_PYTHON).is_file():
+        env = os.environ.copy()
+        lib_dir = venv_bin.parent / "lib"
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            [str(lib_dir)] + ([env["LD_LIBRARY_PATH"]]
+                              if env.get("LD_LIBRARY_PATH") else [])
+        )
+        return [str(VENV_PYTHON), str(launcher)], env
+    system_gmsh = shutil.which("gmsh")
+    if system_gmsh:
+        return [system_gmsh], os.environ.copy()
+    raise ApproachError(
+        f"gmsh not found - install it into the project venv with "
+        f"'{VENV_PYTHON.parent}/pip install gmsh' (the wheel also needs "
+        f"libGLU.so.1 and libOpenGL.so.0), or put a system gmsh on PATH"
+    )
+
+
+def _render(template_name, target, out_name, substitutions):
+    text = (TEMPLATE_DIR / template_name).read_text()
+    for key, value in substitutions.items():
+        text = text.replace(key, str(value))
+    (Path(target) / "system" / out_name).write_text(text)
+
+
+# ---------------------------------------------------------------------------
+# 1. Gmsh core
+# ---------------------------------------------------------------------------
+def write_geo(target, p, split_front_back=False):
+    """Write system/plate.geo: rectangle, size graded away from the plate,
+    extruded one cell in z.
+
+    The curve loop order (symmetry, bottomWall, outlet, topWall, inlet) fixes
+    the Extrude return indices out[2] .. out[6], which is how each lateral
+    surface gets its patch name.  split_front_back keeps the two z faces in
+    separate physical groups (gmshHex needs to tell them apart); otherwise they
+    share the single frontAndBack group that the case fields expect.
+    """
+    if split_front_back:
+        z_groups = ('Physical Surface("front")        = {1};\n'
+                    'Physical Surface("back")         = {out[0]};')
+    else:
+        z_groups = 'Physical Surface("frontAndBack") = {1, out[0]};'
+
+    geo = f"""// Generated by meshing/_gmsh.py - flat-plate core mesh.
+SetFactory("Built-in");
+Mesh.MshFileVersion = 2.2;
+Mesh.Algorithm = 6;
+Mesh.RecombineAll = 0;
+Mesh.MeshSizeExtendFromBoundary = 0;
+Mesh.MeshSizeFromPoints = 0;
+Mesh.MeshSizeFromCurvature = 0;
+
+xInlet  = {p["xInlet"]:.16g};
+xLE     = 0;
+xOutlet = {p["xOutlet"]:.16g};
+yTop    = {p["yTop"]:.16g};
+depth   = {p["depth"]:.16g};
+hWall   = {p["wallCellSize"]:.16g};
+hFar    = {p["farCellSize"]:.16g};
+
+Point(1) = {{xInlet,  0,    0, hWall}};
+Point(2) = {{xLE,     0,    0, hWall}};
+Point(3) = {{xOutlet, 0,    0, hWall}};
+Point(4) = {{xOutlet, yTop, 0, hFar}};
+Point(5) = {{xInlet,  yTop, 0, hFar}};
+
+Line(1) = {{1, 2}};   // symmetry   (upstream of the leading edge)
+Line(2) = {{2, 3}};   // bottomWall (the plate)
+Line(3) = {{3, 4}};   // outlet
+Line(4) = {{4, 5}};   // topWall
+Line(5) = {{5, 1}};   // inlet
+
+Curve Loop(1) = {{1, 2, 3, 4, 5}};
+Plane Surface(1) = {{1}};
+
+// Isotropic core grading: hWall along the whole bottom boundary, relaxing to
+// hFar with distance.  The anisotropic near-wall cells are snappy's job.
+Field[1] = Distance;
+Field[1].CurvesList = {{1, 2}};
+Field[1].Sampling = 2000;
+Field[2] = Threshold;
+Field[2].InField = 1;
+Field[2].SizeMin = hWall;
+Field[2].SizeMax = hFar;
+Field[2].DistMin = {p["distMin"]:.16g};
+Field[2].DistMax = {p["distMax"]:.16g};
+Background Field = 2;
+
+out[] = Extrude {{0, 0, depth}} {{ Surface{{1}}; Layers{{1}}; Recombine; }};
+
+Physical Volume("fluid")         = {{out[1]}};
+{z_groups}
+Physical Surface("symmetry")     = {{out[2]}};
+Physical Surface("bottomWall")   = {{out[3]}};
+Physical Surface("outlet")       = {{out[4]}};
+Physical Surface("topWall")      = {{out[5]}};
+Physical Surface("inlet")        = {{out[6]}};
+"""
+    system_dir = Path(target) / "system"
+    system_dir.mkdir(parents=True, exist_ok=True)
+    (system_dir / "plate.geo").write_text(geo)
+
+
+def run_gmsh(target):
+    argv, env = find_gmsh()
+    rc = _run(argv + ["system/plate.geo", "-3", "-format", "msh2",
+                      "-o", "constant/plate.msh"],
+              target, "log.gmsh", env=env)
+    if rc != 0:
+        log = (Path(target) / "log.gmsh").read_text()
+        hint = re.search(r"(lib\S+): cannot open shared object file", log)
+        if hint:
+            raise ApproachError(
+                f"gmsh cannot load {hint.group(1)} - the PyPI gmsh wheel is a "
+                f"GUI build and needs the GL runtime.  Either "
+                f"'sudo apt install libglu1-mesa libopengl0', or drop the .so "
+                f"files into {Path(VENV_PYTHON).parents[1] / 'lib'} (see "
+            )
+        raise ApproachError(f"gmsh failed (rc={rc}), see log.gmsh")
+
+
+def gmsh_to_foam(target):
+    _foam(["gmshToFoam", "constant/plate.msh"], target, "log.gmshToFoam")
+
+
+# ---------------------------------------------------------------------------
+# 2. Patch bookkeeping
+# ---------------------------------------------------------------------------
+def set_patch_types(target):
+    """Rewrite constant/polyMesh/boundary in place.
+
+    gmshToFoam names the patches from the physical groups but types them all
+    `patch`; extrudeMesh likewise types its exposed patch generically.
+    """
+    path = Path(target) / "constant" / "polyMesh" / "boundary"
+    text = path.read_text()
+    text = re.sub(r"\n\s*physicalType\s+[^;]+;", "", text)
+    for name, patch_type in PATCH_TYPES.items():
+        pattern = rf"(\n\s*{re.escape(name)}\s*\n\s*\{{[^}}]*?\n\s*type\s+)[^;]+;"
+        text = re.sub(pattern, rf"\g<1>{patch_type};", text, count=1)
+    path.write_text(text)
+
+
+def patch_names(target):
+    path = Path(target) / "constant" / "polyMesh" / "boundary"
+    return set(re.findall(r"\n\s{4}(\w+)\s*\n\s{4}\{", path.read_text()))
+
+
+# ---------------------------------------------------------------------------
+# 3. gmshHex only: polygonal dual + 2-D repair
+# ---------------------------------------------------------------------------
+def dualize(target, p):
+    """Triangles -> hexagon-dominant polygonal dual, restored to a clean 2-D mesh.
+
+    polyDualMesh doubles the mesh in z (dual cells sit on the original points,
+    which form two z planes), so the OpenFOAMWiki 2-D recipe applies: keep one
+    layer with setSet/subsetMesh, merge the coplanar exposed polygons, then
+    re-extrude that patch to the full depth.  The re-extrusion starts at
+    depth/2, hence the translate back onto the baseline z range.
+    """
+    target = Path(target)
+    depth = p["depth"]
+    work = target / "_dual"
+    if work.exists():
+        shutil.rmtree(work)
+    (work / "system").mkdir(parents=True)
+    for dict_name in ("controlDict", "fvSchemes", "fvSolution"):
+        shutil.copy2(target / "system" / dict_name, work / "system" / dict_name)
+    (work / "constant").mkdir()
+    shutil.copytree(target / "constant" / "polyMesh", work / "constant" / "polyMesh")
+
+    _foam(["polyDualMesh", str(p["dualFeatureAngle"]), "-overwrite"],
+          work, "log.polyDualMesh")
+    (work / "system" / "splitMesh.setSet").write_text(
+        f"cellSet dualLayer new boxToCell "
+        f"(-1e6 -1e6 -1e6) (1e6 1e6 {0.5 * depth:.16g})\n"
+    )
+    _foam(["setSet", "-constant", "-batch", "system/splitMesh.setSet", "-noVTK"],
+          work, "log.setSet")
+    _foam(["subsetMesh", "dualLayer", "-patch", "back", "-overwrite"],
+          work, "log.subsetMesh")
+    _foam(["combinePatchFaces", "180", "-overwrite"], work, "log.combinePatchFaces")
+
+    _render("extrudeMeshDict", target, "extrudeMeshDict",
+            {"@SOURCE_CASE@": work.resolve(), "@DEPTH@": f"{depth:.16g}"})
+    shutil.rmtree(target / "constant" / "polyMesh")
+    _foam(["extrudeMesh"], target, "log.extrudeMesh")
+    _foam(["transformPoints", "-translate", f"(0 0 {-0.5 * depth:.16g})"],
+          target, "log.transformPoints")
+
+
+def merge_front_back(target):
+    """front + back -> the single empty frontAndBack patch the fields expect."""
+    _render("createPatchDict", target, "createPatchDict", {})
+    _foam(["createPatch", "-overwrite"], target, "log.createPatch")
+
+
+# ---------------------------------------------------------------------------
+# 4. Prism layers + finish
+# ---------------------------------------------------------------------------
+def layer_geometry(p):
+    """(expansion ratio, outermost layer thickness, jump to the core).
+
+    The stack is requested as first layer + overall height; the implied ratio
+    is what snappy actually receives.  The jump is the isotropic core cell size
+    over the outermost layer and has to stay small: the stack hands over to the
+    core inside the log layer, where a large step produces negative-k overshoots.
+    """
+    first, total, n = (p["firstLayerThickness"], p["totalLayerThickness"],
+                       p["nPrisms"])
+    ratio = stack_expansion_ratio(first, total, n)
+    outermost = first * ratio ** (n - 1)
+    return ratio, outermost, p["wallCellSize"] / outermost
+
+
+def add_prism_layers(target, p):
+    """snappyHexMesh addLayers on bottomWall, absolute thicknesses."""
+    ratio, outermost, jump = layer_geometry(p)
+    print(f"    prisms: {p['nPrisms']} layers, stack {p['totalLayerThickness']:.3e} m, "
+          f"ratio {ratio:.3f}, outermost {outermost:.3e} m, "
+          f"core/outermost {jump:.1f}x")
+    if jump > 5.0:
+        print(f"    [warn] prism stack hands over to the core at a {jump:.1f}x "
+              f"size jump - expect bounding-k overshoots and possible "
+              f"divergence; raise nPrisms or wallCellSize")
+    mid_z = 0.5 * p["depth"]
+    _render("meshQualityDict", target, "meshQualityDict", {})
+    _render("snappyHexMeshDict", target, "snappyHexMeshDict", {
+        "@N_PRISMS@": p["nPrisms"],
+        "@FIRST_LAYER@": f"{p['firstLayerThickness']:.16g}",
+        "@EXPANSION_RATIO@": f"{ratio:.9f}",
+        "@MIN_THICKNESS@": f"{p['minThickness']:.16g}",
+        "@LOCATION_IN_MESH@": f"(1 {0.25 * p['yTop']:.16g} {mid_z:.16g})",
+    })
+    _foam(["snappyHexMesh", "-overwrite"], target, "log.snappyHexMesh")
+    # snappy rolls back layers it cannot fit and still exits 0, so check the
+    # FINAL extrusion report (earlier attempts in the log can read 100%).
+    log = (Path(target) / "log.snappyHexMesh").read_text()
+    extruded = re.findall(r"Extruding \d+ out of \d+ faces \(([\d.]+)%\)", log)
+    coverage = float(extruded[-1]) if extruded else 0.0
+    if coverage < 50.0:
+        raise ApproachError(
+            f"prism layers placed on only {coverage:.1f}% of the wall faces - "
+            f"snappy rejected the stack, see log.snappyHexMesh"
+        )
+
+
+def finalize(target, meta):
+    """renumberMesh + checkMesh, verify the patch set, return manifest metadata."""
+    target = Path(target)
+    if _run(["renumberMesh", "-constant", "-overwrite"], target,
+            "log.renumberMesh") != 0:
+        print("    [warn] renumberMesh failed (non-fatal), see log.renumberMesh")
+
+    found = patch_names(target)
+    missing = EXPECTED_PATCHES - found
+    extra = found - EXPECTED_PATCHES
+    if missing:
+        raise ApproachError(
+            f"mesh is missing patches {sorted(missing)} (has {sorted(found)}); "
+            f"the case fields in 0.orig would not apply"
+        )
+    if extra:
+        raise ApproachError(
+            f"mesh has unexpected patches {sorted(extra)} - most likely gmsh "
+            f"left faces outside every physical group (gmshToFoam then creates "
+            f"defaultFaces)"
+        )
+
+    _run(["checkMesh", "-allTopology", "-allGeometry"], target, "log.checkMesh")
+    log = (target / "log.checkMesh").read_text()
+    cells = re.search(r"^\s*cells:\s+(\d+)", log, re.MULTILINE)
+    meta = dict(meta)
+    meta["nCells"] = int(cells.group(1)) if cells else None
+    snappy_log = target / "log.snappyHexMesh"
+    if snappy_log.is_file():
+        added = re.findall(r"Added (\d+) out of (\d+) cells", snappy_log.read_text())
+        if added:  # last report = final state; earlier ones are rolled-back attempts
+            meta["layerCells"] = f"{added[-1][0]}/{added[-1][1]}"
+    non_ortho = re.search(r"non-orthogonality Max:\s*([\d.eE+-]+)", log)
+    if non_ortho:
+        meta["maxNonOrtho"] = float(non_ortho.group(1))
+    return meta

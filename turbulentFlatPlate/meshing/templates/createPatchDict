@@ -1,0 +1,33 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      createPatchDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// gmshHex only.  The dual pipeline has to keep front and back apart (subsetMesh
+// exposes its cut on `back`, extrudeMesh re-extrudes from it); the case fields
+// in 0.orig expect the single `frontAndBack` patch that blockMesh produces.
+
+pointSync false;
+
+patches
+(
+    {
+        name            frontAndBack;
+        patchInfo       { type empty; }
+        constructFrom   patches;
+        patches         (front back);
+    }
+);
+
+// ************************************************************************* //

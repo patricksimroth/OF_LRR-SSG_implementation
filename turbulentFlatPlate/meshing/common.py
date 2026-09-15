@@ -100,3 +100,21 @@ def load_manifest(run_case_dir):
         return json.loads(path.read_text())
     except json.JSONDecodeError:
         return None
+
+
+def stack_expansion_ratio(first, total, n_layers):
+    """Expansion ratio r with first * (r**n - 1) / (r - 1) == total.
+
+    Approaches take the prism stack as its overall height, but it is handed to
+    snappyHexMesh as firstLayerThickness + expansionRatio: v2512's own
+    `thickness` keyword rejects the stack outright (0% extrusion even for a
+    stack that inserts at 100% via expansionRatio).
+    """
+    lo, hi = 1.0 + 1e-12, 5.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if first * (mid ** n_layers - 1.0) / (mid - 1.0) < total:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
