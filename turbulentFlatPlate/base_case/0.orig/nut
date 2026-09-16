@@ -16,7 +16,12 @@ FoamFile
 
 dimensions      [0 2 -1 0 0 0 0];
 
-internalField   uniform 1.25e-7;
+// Freestream eddy viscosity of the TMR farfield: nut = k/omega
+// = 1.087472e-03 / 8705.28 = 1.249209e-07, i.e. nut/nu = 0.009 exactly as
+// TMR quotes.  nut is a calculated field - the model overwrites it every
+// iteration - so this only sets the starting point.  (An SA run relaxes to
+// nut = 0.210438 nu instead, from nuTilda = 3 nu.)
+internalField   uniform 1.249209e-07;
 
 boundaryField
 {
@@ -38,10 +43,13 @@ boundaryField
         value           $internalField;
     }
 
+    // TMR: nut_wall = 0 (wall-resolved, y+ ~ 0.1 - no wall function).
+    // nutUSpaldingWallFunction fits a velocity profile to get nut at the wall,
+    // which is a wall-function model of exactly what this mesh resolves.
     bottomWall
     {
-        type            nutUSpaldingWallFunction;
-        value           $internalField;
+        type            nutLowReWallFunction;
+        value           uniform 0;
     }
 
     symmetry

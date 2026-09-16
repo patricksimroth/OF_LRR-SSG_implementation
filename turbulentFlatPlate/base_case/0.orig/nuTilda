@@ -16,7 +16,14 @@ FoamFile
 
 dimensions      [0 2 -1 0 0 0 0];
 
-internalField   uniform 4.5e-5;
+// TMR 2D zero-pressure-gradient flat plate, M = 0.2, Re/m = 5e6
+// (https://tmbwg.github.io/turbmodels/flatplate.html).  Freestream values are
+// derived from a_inf = 347.606 m/s, rho_inf = 1.274486, mu = 1.769e-5,
+// nu = 1.38801e-5 - see base_case/constant/thermophysicalProperties.
+//
+// TMR SA farfield (spalart.html): nuTilda = 3 nu_inf (range 3..5 nu_inf),
+// which gives nut/nu = 0.210438 in the freestream.  Was 4.5e-5 = 3.24 nu.
+internalField   uniform 4.164031e-05;
 
 boundaryField
 {
@@ -36,7 +43,15 @@ boundaryField
         type            slip;
     }
 
-    "(topWall|bottomWall)"
+    // TMR (spalart.html): nuTilda_wall = 0.  This was zeroGradient, which
+    // lets the wall value float instead of pinning it to zero.
+    bottomWall
+    {
+        type            fixedValue;
+        value           uniform 0;
+    }
+
+    topWall
     {
         type            zeroGradient;
     }

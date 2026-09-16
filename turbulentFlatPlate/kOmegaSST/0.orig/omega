@@ -16,7 +16,11 @@ FoamFile
 
 dimensions      [0 0 -1 0 0 0 0];
 
-internalField   uniform 8675; // 8675=125*69.4/1 ; // 0.011;
+// TMR SST-Vm farfield (flatplate_sst.html):
+//   omega = 1e-6 * rho_inf * a_inf^2 / mu_inf = 8705.28 1/s
+// TMR also quotes the equivalent 125*U_inf/L for this case; 8675 came from
+// that form with L = 1 and is 0.35 % low once mu is the TMR value.
+internalField   uniform 8705.28;
 
 boundaryField
 {
@@ -36,10 +40,22 @@ boundaryField
         type            zeroGradient;
     }
 
+    // TMR (sst.html, rsm-ssglrr.html): omega_wall = 10 * 6 nu / (beta_1 d1^2)
+    // with beta_1 = 0.075 and d1 the wall-to-first-cell-centre distance - the
+    // Menter (1994) low-Re value.  v2512's omegaWallFunction computes
+    // 6 nu / (beta1 * y^2) in its viscous branch and has no factor keyword, so
+    // beta1 is set to 0.075/10: the wall function then reproduces TMR's value
+    // exactly, per face, whatever the local first-layer thickness.  beta1 is
+    // used ONLY in that expression (omegaWallFunctionFvPatchScalarField.C:222),
+    // not in the turbulence model itself.
+    // `blending stepwise` (the default) picks the viscous branch below
+    // y+ = y+lam, which is where this mesh sits (y+ ~ 0.1).  The previous
+    // `blended true` is not a v2512 keyword and was silently ignored.
     bottomWall
     {
         type            omegaWallFunction;
-        blended         true;
+        blending        stepwise;
+        beta1           0.0075;
         value           $internalField;
     }
 

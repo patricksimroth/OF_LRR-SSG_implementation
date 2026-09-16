@@ -16,7 +16,10 @@ FoamFile
 
 dimensions      [0 2 -3 0 0 0 0];
 
-internalField   uniform 0.84321; // from kOmega model epsilon=omega*k*Cmu
+// epsilon = Cmu * k * omega with the TMR farfield k and omega
+// (1.087472e-03, 8705.28).  Only the epsilon-based RSM variants (SSG, LRR)
+// use this field; TMR prescribes no epsilon-based flat-plate BCs.
+internalField   uniform 0.852008;
 
 boundaryField
 {

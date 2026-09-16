@@ -16,7 +16,10 @@ FoamFile
 
 dimensions      [0 2 -2 0 0 0 0];
 
-internalField   uniform 1.08e-3; // 1.08e-3 = 1.125*(69.4)^2/5e6 // 11=3.9% 18.1=5%;
+// TMR SST-Vm farfield (flatplate_sst.html): k = 9e-9 * a_inf^2 = 1.087472e-03
+// (TMR's equivalent form 1.125*U_inf^2/Re_L gives the same value for this
+// case).  Corresponds to Tu = 0.039 %.
+internalField   uniform 1.087472e-03;
 
 boundaryField
 {
@@ -36,10 +39,12 @@ boundaryField
         type            zeroGradient;
     }
 
+    // TMR (sst.html): k_wall = 0.  kqRWallFunction is zeroGradient, a high-Re
+    // wall-function BC, wrong for this wall-resolved mesh.
     bottomWall
     {
-        type            kqRWallFunction;
-        value           $internalField;
+        type            fixedValue;
+        value           uniform 0;
     }
 
     symmetry

@@ -16,8 +16,17 @@ FoamFile
 
 dimensions      [0 2 -2 0 0 0 0];
 
-// internalField uniform (0.55e-3 0 0 0.55e-3 0 1.09e-3);
-internalField uniform (2.9e-3 0 0 2.9e-3 0 0);
+// TMR 2D zero-pressure-gradient flat plate, M = 0.2, Re/m = 5e6
+// (https://tmbwg.github.io/turbmodels/flatplate.html).  Freestream values are
+// derived from a_inf = 347.606 m/s, rho_inf = 1.274486, mu = 1.769e-5,
+// nu = 1.38801e-5 - see base_case/constant/thermophysicalProperties.
+//
+// TMR SSG/LRR-RSM-w2012 farfield (flatplate_ssglrrrsm.html, CFL3D):
+//   R_11 = R_22 = R_33 = 6e-9 a_inf^2 = 7.249814e-04,  R_12 = R_13 = R_23 = 0
+// i.e. isotropic, k = (R_11+R_22+R_33)/2 = 9e-9 a_inf^2 = 1.087472e-03, the
+// same k as the SST farfield.  The previous (2.9e-3 0 0 2.9e-3 0 0) was both
+// 4x too energetic and anisotropic with R_zz = 0.
+internalField uniform (7.249814e-04 0 0 7.249814e-04 0 7.249814e-04);
 boundaryField
 {
     inlet 
@@ -25,9 +34,12 @@ boundaryField
         type fixedValue;
         value $internalField; // (k/2 0 0 k/2 0 k);
     }
+    // TMR (rsm-ssglrr.html): R_ij,wall = 0.  kqRWallFunction is zeroGradient,
+    // which is a high-Re wall-function BC and wrong for this wall-resolved
+    // mesh (y+ ~ 0.1).
     bottomWall
     {
-        type kqRWallFunction;
+        type fixedValue;
         value uniform ( 0 0 0 0 0 0 );
     }
 
