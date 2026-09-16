@@ -251,8 +251,10 @@ def compute_uplus_yplus(df, nu, rho=None):
       the scalar fallback `rho` from pp.detect_case_parameters().
     * u_tau = max(u_tau_local) over the profile.
     * u+  = Ux / u_tau
-    * y+  = u_tau * y / nu; nu is the constant from transportProperties
-      (`transport const` pins nu, so mu = nu * rho_local).
+    * y+  = u_tau * y / nu, with nu = mu/rho_inf from the case's own
+      thermophysicalProperties (pp.detect_case_parameters).  mu is constant
+      here (`transport const`), so the only approximation is using the
+      freestream rho rather than the local one.
     """
     df = df.copy()
     if "rho" in df.columns:

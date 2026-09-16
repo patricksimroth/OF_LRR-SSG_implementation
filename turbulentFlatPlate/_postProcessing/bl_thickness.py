@@ -18,7 +18,6 @@ warns and exits 0, so a missing optional tool never fails the pipeline.
 """
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -37,20 +36,6 @@ N_X = 200
 Y_TOP = 0.08            # well above delta99 at the outlet (~0.027 m)
 N_Y = 4001              # 2e-5 m wall-normal sampling
 TIMEOUT_S = 600
-
-
-def free_stream(case_dir):
-    """(U_inf, nu) for Re_x.  Compressible cases use the solver's own
-    nu = mu / rho with the constant mu from thermophysicalProperties:
-    detect_case_parameters reads nu from a leftover transportProperties
-    (1.388e-5 vs mu/rho = 1.437e-5 here)."""
-    u_inf, nu, rho = pp.detect_case_parameters(case_dir)
-    thermo = Path(case_dir) / "constant" / "thermophysicalProperties"
-    if thermo.is_file() and rho > 0:
-        match = re.search(r"^\s*mu\s+([-\d.eE+]+)\s*;", thermo.read_text(), re.M)
-        if match:
-            nu = float(match.group(1)) / rho
-    return u_inf, nu
 
 
 def delta_turbulent_plate(x, u_inf, nu):
@@ -160,7 +145,7 @@ def main():
             failed.append(run.name)
             continue
         data = np.loadtxt(csv_path, delimiter=",", skiprows=1, ndmin=2)
-        u_inf, nu = free_stream(run)
+        u_inf, nu, _ = pp.detect_case_parameters(run)
         prism = stacks.get(run.name)
         records.append({"name": run.name, "data": data, "u_inf": u_inf, "nu": nu,
                         "prism": prism})

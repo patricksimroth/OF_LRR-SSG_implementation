@@ -254,7 +254,7 @@ def render_cf_section(cf_plot, val_dir: Path, results_root: Path):
         columns = ("model", "station_x", "cf_station", "cf_tmr",
                    "ref_error_pct", "yp_min", "yp_max", "log_rms", "log_max")
         labels = {"model": "Model", "station_x": "x [m]", "cf_station": "Cf",
-                  "cf_tmr": "Cf (TMR)", "ref_error_pct": "err [%]",
+                  "cf_tmr": "Cf (TMR SST)", "ref_error_pct": "err vs SST [%]",
                   "yp_min": "y⁺ min", "yp_max": "y⁺ max",
                   "log_rms": "log-law RMS", "log_max": "log-law max"}
         with open(csv_path, newline="") as stream:

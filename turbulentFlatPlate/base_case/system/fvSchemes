@@ -34,8 +34,6 @@ divSchemes
     // div(phi,p)      bounded Gauss upwind;
     div(phi,p)      bounded Gauss linear;
     
-    div(phi,nuTilda)  bounded Gauss limitedLinear 1; //SA
-
     // Bounded, NOT plain Gauss linear: the central scheme is fine on the
     // orthogonal blockMesh but oscillates on the unstructured gmsh cores,
     // driving sensible e down to -2.5e5 (absolute T below zero) so rho=p/(RT)
@@ -43,21 +41,23 @@ divSchemes
     // With this, gmshTri/gmshHex converge to Ux ~1e-8 and e_min matches the
     // blockMesh baseline (-8.46e4 vs -8.48e4).
     div(phi,e)          bounded Gauss limitedLinear 1;
-    div(R)              Gauss linear;		//simpleFoam
     div(phi,Ekp)        bounded Gauss linear;
-    // turbulence          bounded Gauss limitedLinear 1;
-    div(devRhoReff)     Gauss linear;    //rhoSimpleFoam
+
     turbulence        bounded Gauss limitedLinear 1;
     div(phi,k)          $turbulence;
     div(phi,epsilon)    $turbulence;
     div(phi,omega)      $turbulence;
-    div(phi,R)          $turbulence;		//SSG
-    // div(devRhoReff)     Gauss linear;    //rhoSimpleFoam
-    div((rho*R))        Gauss linear;		//SSG
-    div(((rho*nuEff)*dev2(T(grad(U)))))      Gauss linear;
-    div((nuEff*dev2(T(grad(U)))))                      Gauss linear;//linear
-    div(((rho*(thermo:mu|rho))*dev2(T(grad(U)))))      Gauss linear;		//SSG
-    div((nu*dev2(T(grad(U)))))                      Gauss linear;		//simpleFoam
+    div(phi,nuTilda)    $turbulence;
+    div(phi,R)          $turbulence;
+
+    // Stress divergence, compressible forms only (rhoSimpleFoam).  The
+    // incompressible counterparts div(R), div((nu*dev2(T(grad(U))))) and
+    // div((nuEff*dev2(T(grad(U))))) were leftovers from simpleFoam runs: no
+    // compressible solver ever looks them up.
+    div(((rho*nuEff)*dev2(T(grad(U)))))               Gauss linear;  // eddy viscosity
+    div((rho*R))                                      Gauss linear;  // RSM
+    div(((rho*(thermo:mu|rho))*dev2(T(grad(U)))))     Gauss linear;  // RSM laminar part
+    div(devRhoReff)                                   Gauss linear;  // LRR (couplingFactor)
 
 }
 

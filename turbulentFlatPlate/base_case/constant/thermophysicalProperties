@@ -42,8 +42,20 @@ mixture
     {
         // As          1.4792e-06;
         // Ts          116;
-        mu              1.831e-05;
-        Pr              0.705;
+        // mu is what sets the Reynolds number of this case - it is NOT the
+        // physical viscosity of air at 300 K (1.831e-05).  The NASA TMR flat
+        // plate (https://tmbwg.github.io/turbmodels/flatplate.html) is defined
+        // by M = 0.2 and Re = 5e6 per unit length, i.e. Re_x = 5e6 at x = 1 m
+        // and 1e7 at the trailing edge x = 2 m.  With p = 110000 Pa, T = 300 K
+        // and molWeight 28.9 -> rho_inf = 1.274486 kg/m3, so
+        //     mu = rho_inf * U_inf / (Re/m) = 1.274486 * 69.4 / 5e6
+        //        = 1.769e-05 kg/m/s   ->   nu = mu/rho = 1.38801e-05 m2/s.
+        // The old 1.831e-05 gave nu = 1.4367e-05 and Re/m = 4.83e6, 3.5 % low,
+        // which biases Cf by ~0.7 % (Cf ~ Re^-0.2) against the TMR reference.
+        // Every derived quantity (post-processing nu, TMR omega_inf, nuTilda)
+        // follows from this number - change it and they all move.
+        mu              1.769e-05;
+        Pr              0.705;   // not prescribed by the TMR case
     }
 }
 

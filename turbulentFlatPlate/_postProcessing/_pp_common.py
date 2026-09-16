@@ -9,6 +9,7 @@ starts with an underscore.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -145,17 +146,39 @@ def read_dict_scalar(case_dir, relative_path, key):
     return None
 
 
+def _thermo_mu(text, t_inf):
+    """Dynamic viscosity from a thermophysicalProperties body, or None.
+
+    `transport const` pins `mu` directly; `transport sutherland` gives it as
+    As*sqrt(T)/(1 + Ts/T), evaluated here at the freestream T.
+    """
+    match = re.search(r"^\s*mu\s+([-\d.eE+]+)\s*;", text, re.M)
+    if match:
+        return float(match.group(1))
+    a_match = re.search(r"^\s*As\s+([-\d.eE+]+)\s*;", text, re.M)
+    s_match = re.search(r"^\s*Ts\s+([-\d.eE+]+)\s*;", text, re.M)
+    if a_match and s_match and t_inf:
+        a_s, t_s = float(a_match.group(1)), float(s_match.group(1))
+        return a_s * math.sqrt(t_inf) / (1.0 + t_s / t_inf)
+    return None
+
+
 def detect_case_parameters(case_dir, fallback_u_inf=69.4, fallback_nu=1.388e-05):
     """Detect (u_inf, nu, rho) for a model case directory.
 
     u_inf : X-component of the internalField of 0/U (fallback 0.orig/U).
-    nu    : `nu` from constant/transportProperties (fallback: default above).
     rho   : for a compressible case (constant/thermophysicalProperties present)
              rho = p/(R_s*T) from the internalField of 0/p, 0/T (fallback
              0.orig) plus molWeight.  Valid to <<1 % here: constant T,
-             ~zero wall pressure gradient, Ma ~ 0.13 -> wall rho ~= inlet rho.
+             ~zero wall pressure gradient, Ma = 0.2 -> wall rho ~= inlet rho.
              For an incompressible case: `rho` from transportProperties if
              present, else 1.0.
+    nu    : for a compressible case mu/rho, with mu taken from the same
+             thermophysicalProperties the solver reads (`transport const` or
+             `sutherland`).  This is the single source of truth: mu is what
+             sets Re here (TMR: M = 0.2, Re/m = 5e6 -> mu = 1.769e-05,
+             nu = 1.388e-05).  Only an incompressible case falls back to `nu`
+             from transportProperties.
     """
     case_dir = Path(case_dir)
 
@@ -174,32 +197,40 @@ def detect_case_parameters(case_dir, fallback_u_inf=69.4, fallback_nu=1.388e-05)
     tp_path = case_dir / "constant" / "transportProperties"
     tp_text = tp_path.read_text() if tp_path.is_file() else ""
 
-    nu = fallback_nu
-    match = re.search(r"^\s*nu\s+([-\d.eE+]+)\s*;", tp_text, re.M)
-    if match:
-        nu = float(match.group(1))
-
     rho = None
     match = re.search(r"^\s*rho\s+([-\d.eE+]+)\s*;", tp_text, re.M)
     if match:
         rho = float(match.group(1))
 
+    t_inf = _read_internal_field(case_dir / "0" / "T")
+    if t_inf is None:
+        t_inf = _read_internal_field(case_dir / "0.orig" / "T")
+
+    mu = None
     tpm_path = case_dir / "constant" / "thermophysicalProperties"
     if tpm_path.is_file():
-        m_match = re.search(r"molWeight\s+([-\d.eE+]+)", tpm_path.read_text())
+        tpm_text = tpm_path.read_text()
+        m_match = re.search(r"molWeight\s+([-\d.eE+]+)", tpm_text)
         p = _read_internal_field(case_dir / "0" / "p")
         if p is None:
             p = _read_internal_field(case_dir / "0.orig" / "p")
-        t = _read_internal_field(case_dir / "0" / "T")
-        if t is None:
-            t = _read_internal_field(case_dir / "0.orig" / "T")
-        if m_match and p is not None and t:
+        if m_match and p is not None and t_inf:
             m_kg_per_kmol = float(m_match.group(1))
             if m_kg_per_kmol > 0:
-                rho = p / ((8314.462618 / m_kg_per_kmol) * t)
+                rho = p / ((8314.462618 / m_kg_per_kmol) * t_inf)
+        mu = _thermo_mu(tpm_text, t_inf)
 
     if rho is None:
         rho = 1.0
+
+    if mu is not None:
+        nu = mu / rho
+    else:
+        # Incompressible case: nu straight from transportProperties.
+        nu = fallback_nu
+        match = re.search(r"^\s*nu\s+([-\d.eE+]+)\s*;", tp_text, re.M)
+        if match:
+            nu = float(match.group(1))
     return u_inf, nu, rho
 
 

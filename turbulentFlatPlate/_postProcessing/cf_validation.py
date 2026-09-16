@@ -12,9 +12,11 @@ This script mirrors the methodology used in
   ``wallShearStress`` and ``yPlus`` fields are written as ASCII ``.raw``
   tables in the same ``postProcessing/<func>/<latestTime>`` layout used by
   the reference.
-* Reference data – the TMR CFL3D/FUN3D compressible flat-plate reference
-  for ``Cf(x)`` is read from ``_validation_data/tmr_cf_plate.dat`` (SA) and
-  ``_validation_data/tmr_cf_plate_sst.dat`` (SST).
+* Reference data – ONE curve for every run: the TMR CFL3D/FUN3D compressible
+  flat-plate ``Cf(x)`` for the SST model, ``_validation_data/tmr_cf_plate_sst.dat``
+  (see TMR_REFERENCE_FILE).  It is applied to every run regardless of that run's
+  turbulence model, so ``ref_error_pct`` is the distance to the SST reference,
+  not a like-for-like model error.
 * Calculation – ``Cf = 2 |tau_w| / (rho U_inf^2)`` is computed from the
   sampled ``wallShearStress``.  ``U_inf``, ``nu`` and ``rho`` are detected
   per model from the case files (see ``_pp_common.detect_case_parameters``).
@@ -55,12 +57,21 @@ import _pp_common as pp
 # Default constants for the test_cases/turbulentFlatPlate setup
 # ---------------------------------------------------------------------------
 # Fallbacks only; U_inf, nu and rho are detected per model by
-# pp.detect_case_parameters() (reads 0/U, transportProperties and, for
-# compressible cases, thermophysicalProperties + 0/p + 0/T).
+# pp.detect_case_parameters() (0/U, plus thermophysicalProperties + 0/p + 0/T
+# for the compressible cases here: nu = mu/rho).  These defaults mirror the
+# TMR flat plate, M = 0.2 and Re/m = 5e6 -> U = 69.4 m/s, nu = 1.388e-05.
 U_INF_DEFAULT = 69.4
 NU_DEFAULT = 1.388e-05
 # Reference station used by the flat_plate_andre_v2 validation.
 REF_STATION_X = 0.97008
+
+# The single Cf reference every run is compared against.  TMR publishes SA,
+# SST and SSG/LRR-RSM-w2012 curves for this case; only the SST one is used
+# here, as the most trusted of the three.  Its CFL3D and FUN3D zones differ by
+# 0.01 % at the reference station, so they are averaged into one curve.
+# _validation_data/tmr_cf_plate.dat (the SA curve) stays in the repo unused.
+TMR_REFERENCE_FILE = "tmr_cf_plate_sst.dat"
+TMR_REFERENCE_LABEL = "TMR SST (CFL3D/FUN3D)"
 # log-law constants
 KAPPA = 0.41
 B = 5.0
@@ -143,6 +154,28 @@ def parse_tecplot_zones(path):
             except ValueError:
                 continue
     return {key: np.asarray(value) for key, value in result.items()}
+
+
+def load_reference(val_dir):
+    """The single TMR reference curve as (x, cf), or None if the file is absent.
+
+    The per-code zones (CFL3D, FUN3D) are averaged onto the union of their x
+    stations: they agree to 0.01 % here, so one curve carries the reference
+    without drawing every zone separately.
+    """
+    path = os.path.join(val_dir, TMR_REFERENCE_FILE)
+    if not os.path.exists(path):
+        print(f"  [warn] TMR reference not found: {path}")
+        return None
+    zones = parse_tecplot_zones(path)
+    if not zones:
+        print(f"  [warn] no zones parsed from {path}")
+        return None
+    x = np.unique(np.concatenate([c[:, 0] for c in zones.values()]))
+    cf = np.mean([np.interp(x, c[:, 0], c[:, 1]) for c in zones.values()], axis=0)
+    print(f"  reference   : {TMR_REFERENCE_FILE} "
+          f"({', '.join(zones)}; {len(x)} stations)")
+    return np.column_stack((x, cf))
 
 
 def compute_cf_from_shear(tau_components, rho, u_inf=U_INF_DEFAULT):
@@ -235,7 +268,7 @@ def find_profile_file(case_dir):
     return None
 
 
-def process_model(model_name, case_dir, references, ref_station_x=REF_STATION_X):
+def process_model(model_name, case_dir, reference, ref_station_x=REF_STATION_X):
     """Build the per-model record used for the plots and the summary table."""
     record = {"model": model_name, "display": DISPLAY_NAME.get(model_name, model_name)}
 
@@ -281,22 +314,17 @@ def process_model(model_name, case_dir, references, ref_station_x=REF_STATION_X)
             record["yp_max"] = float(record["yp"].max())
             record["yp_source"] = os.path.relpath(yp_path, case_dir)
 
-    # Reference-data error: only meaningful if a TMR reference is available
-    # for this model.  The TMR flat-plate reference provides SA and SST
-    # curves; LRR and SSG are not validated against TMR (mirroring
-    # flat_plate_andre_v2 which reports their error as n/a).
-    cf_tmr_avg = []
-    if model_name in references:
-        for _zone_name, curve in references[model_name].items():
-            cf_tmr_avg.append(np.interp(record["station_x"], curve[:, 0], curve[:, 1]))
-        if cf_tmr_avg:
-            cf_tmr = float(np.mean(cf_tmr_avg))
-            record["cf_tmr"] = cf_tmr
-            record["ref_error_pct"] = 100.0 * (record["cf_station"] - cf_tmr) / cf_tmr
-        else:
-            record["ref_error_pct"] = float("nan")
-    else:
+    # Distance to the TMR SST reference at the station.  Applied to every run:
+    # the run dirs of a study are named <model>__<approach>, so keying the
+    # reference by model name (as this used to do) matched nothing and left
+    # cf_tmr empty for every study run.
+    if reference is None:
         record["ref_error_pct"] = float("nan")
+    else:
+        cf_tmr = float(np.interp(record["station_x"],
+                                 reference[:, 0], reference[:, 1]))
+        record["cf_tmr"] = cf_tmr
+        record["ref_error_pct"] = 100.0 * (record["cf_station"] - cf_tmr) / cf_tmr
 
     # Wall-normal profile at x=0.97008 -> log-law RMS.
     profile_path = find_profile_file(case_dir)
@@ -325,7 +353,7 @@ def process_model(model_name, case_dir, references, ref_station_x=REF_STATION_X)
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def plot_cf_combined(records, references, output_path, ref_station_x=REF_STATION_X):
+def plot_cf_combined(records, reference, output_path, ref_station_x=REF_STATION_X):
     """Single Cf-vs-x plot with every model and the TMR reference overlaid.
 
     This is the test_cases equivalent of
@@ -349,19 +377,13 @@ def plot_cf_combined(records, references, output_path, ref_station_x=REF_STATION
                 linewidth=1.2, label=record["display"])
         plotted_any = True
 
-    # TMR reference: one curve per (model, zone) pair.
-    tmr_legend_added = False
-    for model, curves in references.items():
-        for zone_name, curve in curves.items():
-            mask = (curve[:, 0] >= 0.05) & (curve[:, 0] <= 1.95)
-            label = None
-            if not tmr_legend_added:
-                label = f"TMR {model.replace('kOmegaSST', 'SST').replace('kEpsilon', 'SA')}"
-                tmr_legend_added = True
-            ax.plot(curve[mask, 0], curve[mask, 1],
-                    color="black", linestyle="--",
-                    linewidth=1.0, alpha=0.55, label=label)
-            plotted_any = True
+    # The one TMR reference, drawn once and labelled.
+    if reference is not None:
+        mask = (reference[:, 0] >= 0.05) & (reference[:, 0] <= 1.95)
+        ax.plot(reference[mask, 0], reference[mask, 1],
+                color="black", linestyle="--", linewidth=1.2, alpha=0.7,
+                label=TMR_REFERENCE_LABEL)
+        plotted_any = True
 
     if plotted_any:
         # Mark the reference station used for the table.
@@ -376,7 +398,7 @@ def plot_cf_combined(records, references, output_path, ref_station_x=REF_STATION
 
     ax.set_xlabel(r"$x$  [m]")
     ax.set_ylabel(r"$C_f$")
-    ax.set_title("Local skin-friction coefficient – all models vs. TMR")
+    ax.set_title("Local skin-friction coefficient – all runs vs. TMR SST")
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(loc="best", fontsize=9)
     fig.tight_layout()
@@ -469,7 +491,9 @@ def write_summary_csv(records, output_path):
 
 
 def write_summary_txt(records, output_path):
-    lines = ["model, station_x, Cf(station), TMR Cf, error %, "
+    lines = [f"reference: {TMR_REFERENCE_LABEL} - applied to every run, "
+             f"regardless of its turbulence model",
+             "model, station_x, Cf(station), TMR Cf, error %, "
              "wall y+ min/max, log-law RMS, log-law max"]
     for record in records:
         if record is None:
@@ -516,21 +540,9 @@ def main():
     print(f"source_case_dir: {source_case_dir}")
     print(f"results_root   : {results_root}")
 
-    # Reference data (TMR flat plate).
-    # TMR provides Cf curves for the SA and SST models only; LRR and SSG
-    # have no like-for-like reference and are reported as n/a (mirrors
-    # flat_plate_andre_v2/validation/REPORT.md).
+    # Reference data: the TMR SST flat-plate curve, used for every run.
     val_dir = os.path.join(source_case_dir, "_validation_data")
-    references = {}
-    sa_path = os.path.join(val_dir, "tmr_cf_plate.dat")
-    sst_path = os.path.join(val_dir, "tmr_cf_plate_sst.dat")
-    if os.path.exists(sa_path):
-        references["kEpsilon"] = parse_tecplot_zones(sa_path)
-    if os.path.exists(sst_path):
-        references["kOmegaSST"] = parse_tecplot_zones(sst_path)
-        # kOmegaSST_andre uses TMR-style conditions so the same SST reference
-        # applies directly.
-        references["kOmegaSST_andre"] = parse_tecplot_zones(sst_path)
+    reference = load_reference(val_dir)
 
     # Discover and process models.
     models = discover_models(run_case_dir)
@@ -544,7 +556,7 @@ def main():
     for model_name in models:
         print(f"\n--- {model_name} ---")
         case_dir = os.path.join(run_case_dir, model_name)
-        record = process_model(model_name, case_dir, references)
+        record = process_model(model_name, case_dir, reference)
         if record is None:
             continue
         records.append(record)
@@ -564,7 +576,7 @@ def main():
     out_dir = os.path.join(results_root, "validation")
     os.makedirs(out_dir, exist_ok=True)
 
-    plot_cf_combined(records, references,
+    plot_cf_combined(records, reference,
                      os.path.join(out_dir, "cf_validation.png"))
     plot_yplus_combined(records, os.path.join(out_dir, "yplus_validation.png"))
     write_summary_csv(records, os.path.join(out_dir, "cf_validation.csv"))
