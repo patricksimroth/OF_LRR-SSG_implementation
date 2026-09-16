@@ -482,13 +482,17 @@ if __name__ == "__main__":
         print(f"Loaded Coles profile: {len(coles)} points")
     else:
         print(f"[warn] Coles profile not found: {coles_file}")
-    # Discover model folders
+    # Discover model folders.  Crashed runs keep a postProcessing/ tree, so
+    # they are dropped here rather than silently plotted (see
+    # _pp_common.run_completed).
     model_folders = []
     if os.path.isdir(run_case_dir):
         model_folders = [
             item for item in os.listdir(run_case_dir)
             if os.path.isdir(os.path.join(run_case_dir, item, "postProcessing"))
         ]
+    model_folders, crashed = pp.split_completed(run_case_dir, model_folders)
+    pp.warn_failed(crashed, "the u+/y+ validation")
     if not model_folders:
         print(f"[warn] no model folders found under {run_case_dir}")
     models_uplus = {}   # {model_name: DataFrame(u_plus, y_plus)}

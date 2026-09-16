@@ -166,11 +166,14 @@ def discover_models(run_case_dir):
 
     Prefers the dedicated ``yPlus_reference_2``/``samplePlate`` directories
     and falls back to anything that has a usable ``wallShearStress_*.raw``
-    file.
+    file.  Runs whose solver crashed are excluded: they leave partly written
+    samples behind that would enter the validation plot as if they were
+    converged results (see ``_pp_common.run_completed``).
     """
     if not os.path.isdir(run_case_dir):
         return []
     found = []
+    crashed = []
     for entry in sorted(os.listdir(run_case_dir)):
         case_dir = os.path.join(run_case_dir, entry)
         post = os.path.join(case_dir, "postProcessing")
@@ -187,8 +190,13 @@ def discover_models(run_case_dir):
                     break
             if has_data:
                 break
-        if has_data:
+        if not has_data:
+            continue
+        if pp.run_completed(case_dir):
             found.append(entry)
+        else:
+            crashed.append(entry)
+    pp.warn_failed(crashed, "the Cf validation")
     return found
 
 

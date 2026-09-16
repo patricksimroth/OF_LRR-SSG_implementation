@@ -58,8 +58,25 @@ else
 fi
 
 if [ -d "results" ]; then
-    # Removes everything inside 'results' but keeps the directory itself
-    rm -rf results/*
+    # Removes everything inside 'results' but keeps the directory itself AND
+    # every study folder: run_study.sh writes results/<case>/<study>/ with its
+    # own config, manifest and git provenance, accumulates them across studies
+    # and replaces only its own.  Wiping them here would undo that.
+    kept=0
+    for entry in results/*/*; do
+        [ -e "$entry" ] || continue
+        if [ -d "$entry" ] && [ -f "$entry/provenance.json" ]; then
+            kept=$((kept + 1))
+            continue
+        fi
+        rm -rf "$entry"
+    done
+    for entry in results/*; do
+        [ -d "$entry" ] || { rm -rf "$entry"; continue; }
+        # drops the case dir when no study folder survived in it
+        rmdir "$entry" 2>/dev/null
+    done
+    [ "$kept" -gt 0 ] && echo "  keeping $kept study result folder(s) under results/<case>/<study>/"
 else
     mkdir results
 fi

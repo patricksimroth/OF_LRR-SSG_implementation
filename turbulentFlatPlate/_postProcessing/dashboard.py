@@ -6,6 +6,7 @@ by postpro.py and a dedicated Cf Validation section from cf_validation.py.
 """
 import csv
 import html
+import json
 # import os
 from datetime import datetime
 from pathlib import Path
@@ -185,6 +186,41 @@ def render_logs(log_list, results_root: Path):
             href = quote(str(p).replace("\\", "/"))
         items.append(f'<li><a href="{href}">{html.escape(p.name)}</a></li>')
     return f'<ul class="links">{"".join(items)}</ul>'
+def provenance_pills(results_root: Path):
+    """Study and commit pills from the provenance.json run_study.py wrote.
+
+    The dashboard is what gets looked at months later, so it has to say which
+    code produced the data - and say it loudly when the tree was dirty, since
+    the commit alone then describes code that never ran."""
+    path = results_root / "provenance.json"
+    if not path.is_file():
+        return ""
+    try:
+        record = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return ""
+    pills = []
+    if record.get("study"):
+        pills.append(f'<span class="pill">Study: {html.escape(record["study"])}</span>')
+    git = record.get("git") or {}
+    if git.get("commit"):
+        label = f"Commit: {git['commit'][:7]}"
+        style = ""
+        if git.get("dirty"):
+            label += f" + {len(git.get('changed', []))} uncommitted change(s)"
+            style = ' style="color:#c0392b;border-color:#c0392b;"'
+        pills.append(f'<span class="pill"{style}>{html.escape(label)}</span>')
+    return "".join(pills)
+def run_status(run_case_dir: Path, model: str):
+    """(label, html colour) for the Summary table's status column.  Runs the
+    solver did not finish are excluded from every validation plot, so the
+    dashboard has to say so instead of just showing an empty section."""
+    case_dir = run_case_dir / model
+    if not case_dir.is_dir():
+        return "no run dir", "var(--muted)"
+    if pp.run_completed(case_dir):
+        return "completed", "inherit"
+    return "FAILED (solver did not reach End)", "#c0392b"
 def render_model_summary(models, run_case_dir: Path, results_root: Path):
     if not models:
         return '<p class="empty">No models found.</p>'
@@ -193,10 +229,14 @@ def render_model_summary(models, run_case_dir: Path, results_root: Path):
         conv_dir = results_root / m / "convergence_plots"
         n_plots  = len(image_files(conv_dir))
         n_logs   = len(log_files(run_case_dir / m))
+        status, colour = run_status(run_case_dir, m)
         rows.append(
-            f"<tr><td>{html.escape(m)}</td><td>{n_plots}</td><td>{n_logs}</td></tr>"
+            f"<tr><td>{html.escape(m)}</td>"
+            f'<td style="color:{colour};">{html.escape(status)}</td>'
+            f"<td>{n_plots}</td><td>{n_logs}</td></tr>"
         )
-    header = "<tr><th>Model</th><th>Convergence plots</th><th>Log files</th></tr>"
+    header = ("<tr><th>Model</th><th>Status</th><th>Convergence plots</th>"
+              "<th>Log files</th></tr>")
     return f"<table>{header}{''.join(rows)}</table>"
 # ---------------------------------------------------------------------------
 # Dashboard builder
@@ -356,6 +396,7 @@ th {{ color: var(--muted); font-weight: 650; background: #fbfcfd; }}
   <p>Static results dashboard – turbulent flat plate u<sup>+</sup>/y<sup>+</sup> validation.</p>
   <div class="meta">
     <span class="pill">Generated: {html.escape(generated_at)}</span>
+    {provenance_pills(results_root)}
     <span class="pill">Models: {len(models)}</span>
     <span class="pill">Plots: {n_plots}</span>
     <span class="pill">Logs: {len(all_logs_run)}</span>

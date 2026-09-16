@@ -24,6 +24,11 @@ def resolve_case_paths(script_dir):
 
     script_dir is either the case-local `_postProcessing` source directory or a
     directory directly under `run/<case>/`.
+
+    For a study run, results_root is `results/<case>/<study>/`: the study name
+    comes from run/<case>/study_manifest.json, so every script lands in the
+    folder run_study.py created and studies no longer overwrite each other.
+    Without a manifest (run_simulation.sh) it stays `results/<case>/`.
     """
     script_dir = Path(script_dir)
     if script_dir.name == "_postProcessing":
@@ -43,6 +48,9 @@ def resolve_case_paths(script_dir):
             run_case_dir = base_path / "run" / case_name
             source_case_dir = script_dir
     results_root = base_path / "results" / case_name
+    manifest = load_manifest(run_case_dir)
+    if manifest and manifest.get("study"):
+        results_root = results_root / manifest["study"]
     return base_path, case_name, run_case_dir, source_case_dir, results_root
 
 
@@ -218,19 +226,77 @@ def pvbatch_env():
             if k not in ("LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME")}
 
 
+# ---------------------------------------------------------------------------
+# Run completion (crashed runs must not enter the validation output)
+# ---------------------------------------------------------------------------
+SOLVER_LOG = "log.rhoSimpleFoam"
+
+
+def run_completed(case_dir):
+    """True if the solver ran to completion in case_dir.
+
+    A diverged run (e.g. rhoSimpleFoam aborting on "Negative initial
+    temperature") leaves its 0/ fields and a partial postProcessing/ tree
+    behind, which otherwise looks exactly like a result.  Two cheap checks
+    separate the two: the solver log ends in OpenFOAM's `End`, and a time
+    directory later than 0 was reconstructed.
+    """
+    case_dir = Path(case_dir)
+    log_path = case_dir / SOLVER_LOG
+    if not log_path.is_file():
+        return False
+    try:
+        tail = log_path.read_text(errors="replace")[-4096:]
+    except OSError:
+        return False
+    if not re.search(r"^End\s*$", tail, re.M):
+        return False
+    latest = latest_time_directory(case_dir)
+    if latest is None:
+        return False
+    try:
+        return float(latest.name) > 0.0
+    except ValueError:
+        return False
+
+
+def split_completed(run_case_dir, names):
+    """Split run-dir names into (completed, failed) by run_completed()."""
+    run_case_dir = Path(run_case_dir)
+    completed, failed = [], []
+    for name in names:
+        (completed if run_completed(run_case_dir / name) else failed).append(name)
+    return completed, failed
+
+
+def warn_failed(failed, what):
+    """Print one warning line naming the runs excluded from `what`."""
+    if failed:
+        print(f"[warn] excluded from {what} - solver did not reach End: "
+              f"{', '.join(sorted(failed))}")
+
+
 def solved_run_dirs(run_case_dir):
-    """(run dir, latest time dir) for run dirs under run_case_dir with a
-    controlDict and a reconstructed latest time holding p."""
+    """(run dir, latest time dir) for completed run dirs under run_case_dir
+    with a controlDict and a reconstructed latest time holding p.
+
+    Runs whose solver crashed are dropped (see run_completed).
+    """
     run_case_dir = Path(run_case_dir)
     if not run_case_dir.is_dir():
         return []
-    found = []
+    found, failed = [], []
     for item in sorted(run_case_dir.iterdir()):
         if not item.is_dir() or item.name.startswith("_"):
             continue
         if not (item / "system" / "controlDict").is_file():
             continue
         latest = latest_time_directory(item)
-        if latest is not None and (latest / "p").is_file():
+        if latest is None or not (latest / "p").is_file():
+            continue
+        if run_completed(item):
             found.append((item, latest))
+        else:
+            failed.append(item.name)
+    warn_failed(failed, "post-processing")
     return found

@@ -3,7 +3,14 @@ run_study.py – config-driven study runner (models x mesh parameter sweeps).
 
 Driven by ./run_study.sh <case>/studies/<study> [--mesh-only] [--dry-run].
 
+Results land in results/<case>/<study>/ and only that study's own folder is
+replaced on a re-run, so studies accumulate instead of overwriting each other.
+Each folder keeps the config, the manifest and a provenance stamp (commit,
+dirty flag, uncommitted.patch, library fingerprints) - results/ is gitignored,
+so nothing else records which code produced the data.
+
 Pipeline:
+  0. wmake libso every custom library under src/ (--no-build to skip)
   1. load config.toml, expand combos: models x approaches x parameter sets
      (list params = cartesian sweep, [[params.sets]] = explicit combos).
      `approach` may be a single name or a list; [params] is then the union over
@@ -12,7 +19,8 @@ Pipeline:
      (each approach sizes its core with its own parameters).
   2. assemble run/<case>/<model>__<tag>/ from base_case + model overlay
   3. approach.generate() -> constant/polyMesh (blockMesh / snappy / gmsh ...)
-  4. run/<case>/study_manifest.json (consumed by the post-processing)
+  4. run/<case>/study_manifest.json (consumed by the post-processing, which
+     reads the study name from it to resolve results/<case>/<study>/)
   5. ./Allrun per combo (Allrun skips blockMesh when polyMesh is pre-generated)
   6. post-processing: postpro -> other scripts -> dashboard last
 """
@@ -34,11 +42,14 @@ from meshing.common import (
     RESULTS_ROOT,
     RUN_ROOT,
     VENV_PYTHON,
+    build_libraries,
     combo_tag,
     copy_tree,
     expand_params,
     load_config,
+    report_provenance,
     write_manifest,
+    write_provenance,
 )
 
 
@@ -53,6 +64,9 @@ def parse_args(argv):
                         help="comma-separated subset of the configured models")
     parser.add_argument("--approaches", default=None,
                         help="comma-separated subset of the configured approaches")
+    parser.add_argument("--no-build", action="store_true",
+                        help="skip the wmake of the src/ libraries (the study then "
+                             "runs against whatever .so is already built)")
     return parser.parse_args(argv)
 
 
@@ -184,7 +198,7 @@ def main(argv=None):
     if lock is None:
         return 2
     try:
-        return _run_study(args, case_name, study_name, approaches,
+        return _run_study(args, case_name, study_name, study_dir, approaches,
                           by_name, plan)
     finally:
         lock.unlink(missing_ok=True)
@@ -219,14 +233,29 @@ def acquire_lock(case_name):
     return lock
 
 
-def _run_study(args, case_name, study_name, approaches, by_name, plan):
+def _run_study(args, case_name, study_name, study_dir, approaches, by_name, plan):
     run_case_dir = RUN_ROOT / case_name
     if run_case_dir.exists():
         shutil.rmtree(run_case_dir)
     run_case_dir.mkdir(parents=True)
-    results_case_dir = RESULTS_ROOT / case_name
-    if results_case_dir.exists():
-        shutil.rmtree(results_case_dir)
+    # Only this study's own results are replaced.  Sibling studies survive,
+    # each described by the config, manifest and provenance in its own folder.
+    results_study_dir = RESULTS_ROOT / case_name / study_name
+    if results_study_dir.exists():
+        shutil.rmtree(results_study_dir)
+    results_study_dir.mkdir(parents=True)
+
+    if args.no_build:
+        print("  [warn] --no-build: running against the already-built "
+              "src/*/lib/*.so, which may not match its source")
+    else:
+        build_failed = build_libraries(results_study_dir / "_build")
+        if build_failed:
+            print(f"[error] wmake libso failed for: {', '.join(build_failed)}")
+            print("        Aborting: the solver loads the .so named in "
+                  "controlDict, so a stale binary would silently produce "
+                  "results that the recorded commit does not describe.")
+            return 2
 
     mesh_failed = []
     for entry in plan:
@@ -252,6 +281,9 @@ def _run_study(args, case_name, study_name, approaches, by_name, plan):
             print(f"  [FAILED]    {entry['run_dir']}: {exc}")
     manifest_path = write_manifest(run_case_dir, study_name, plan)
     print(f"  manifest -> {manifest_path}")
+    report_provenance(write_provenance(results_study_dir, case_name, study_name,
+                                       study_dir, run_case_dir))
+    print(f"  results  -> {results_study_dir}")
 
     failed_mesh = [e["run_dir"] for e in plan if e["status"] != "ok"]
     if args.mesh_only:
