@@ -128,32 +128,8 @@ def assign_plot_styles(models):
 # ---------------------------------------------------------------------------
 # Reference data parsing (Techplot .dat format used by the TMR repository)
 # ---------------------------------------------------------------------------
-def parse_tecplot_zones(path):
-    """Parse a Tecplot-style .dat file with one or more 'zone, t="<name>"' blocks.
-
-    Returns a dict {zone_name: ndarray(shape=(N, 2))} where the columns are
-    (x, value).  Mirrors the parser used by flat_plate_andre_v2's
-    validate_matrix.py.
-    """
-    result: dict[str, list[list[float]]] = {}
-    name = None
-    with open(path) as stream:
-        for line in stream:
-            match = re.search(r'zone.*t="([^"]+)"', line, re.I)
-            if match:
-                name = match.group(1)
-                result[name] = []
-                continue
-            if not name:
-                continue
-            parts = line.split()
-            if len(parts) != 2:
-                continue
-            try:
-                result[name].append([float(parts[0]), float(parts[1])])
-            except ValueError:
-                continue
-    return {key: np.asarray(value) for key, value in result.items()}
+# parse_tecplot_zones moved to _pp_common (shared with profile_validation.py).
+parse_tecplot_zones = pp.parse_tecplot_zones
 
 
 def load_reference(val_dir):

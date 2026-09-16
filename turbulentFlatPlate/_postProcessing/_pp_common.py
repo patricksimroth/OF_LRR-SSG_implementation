@@ -115,6 +115,95 @@ def read_numeric_rows(file_path, comments="#"):
 
 
 # ---------------------------------------------------------------------------
+# Reference data (Tecplot) and sampled line profiles
+# ---------------------------------------------------------------------------
+def parse_tecplot_zones(path):
+    """Parse a Tecplot-style .dat file into {zone name: ndarray(N, C)}.
+
+    Recognises `zone, t="<name>"` / `ZONE T="<name>"` headers.  The column
+    count is taken from the first numeric row of each zone; rows of a
+    different width are skipped, which drops the `I=..., J=...` and
+    `DT=(SINGLE ...)` lines of ordered zones without special-casing them.
+    """
+    zones, rows, name = {}, None, None
+    with open(path) as stream:
+        for line in stream:
+            match = re.search(r'zone.*t\s*=\s*"([^"]+)"', line, re.I)
+            if match:
+                name = match.group(1)
+                zones[name] = rows = []
+                continue
+            if name is None:
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                values = [float(v) for v in parts]
+            except ValueError:
+                continue
+            if rows and len(values) != len(rows[0]):
+                continue
+            rows.append(values)
+    return {key: np.asarray(value) for key, value in zones.items() if value}
+
+
+_SYMM_TENSOR = ("xx", "xy", "xz", "yy", "yz", "zz")
+
+# `sets` names its output file after the sampled fields, ordered by type
+# (scalars, vectors, symmTensors) and alphabetically within a type, skipping
+# fields the model does not have (e.g. k/omega for SA).  The column layout
+# therefore differs per model and has to come from the file name.
+PROFILE_FIELD_COLUMNS = {
+    "rho": ["rho"],
+    "yPlus": ["yPlus"],
+    "nut": ["nut"],
+    "nuTilda": ["nuTilda"],
+    "k": ["k"],
+    "omega": ["omega"],
+    "epsilon": ["epsilon"],
+    "U": ["Ux", "Uy", "Uz"],
+    "wallShearStress": ["tau_x", "tau_y", "tau_z"],
+    "R": [f"R_{c}" for c in _SYMM_TENSOR],                           # transported (RSM)
+    "turbulenceProperties:R": [f"R_tp_{c}" for c in _SYMM_TENSOR],   # turbulenceFields output
+}
+
+
+def profile_columns_from_filename(file_path):
+    """Column names of a `<set>_profile_<field>_<field>_....xy` file, or None.
+
+    The name is only trustworthy when it expands to the actual column count -
+    the caller checks that.
+    """
+    base = Path(file_path).name
+    marker = "_profile_"
+    if marker not in base or not base.endswith(".xy"):
+        return None
+    cols = ["y"]
+    for token in base.split(marker, 1)[1][: -len(".xy")].split("_"):
+        if token not in PROFILE_FIELD_COLUMNS:
+            return None
+        cols.extend(PROFILE_FIELD_COLUMNS[token])
+    return cols
+
+
+def read_profile_set(file_path):
+    """(column names, ndarray) of one sampled `sets` profile, or (None, None).
+
+    Rows are sorted by wall distance.  Only files whose name expands to the
+    column count are accepted, so a layout change cannot silently mislabel
+    columns.
+    """
+    arr = read_numeric_rows(file_path)
+    if arr is None:
+        return None, None
+    cols = profile_columns_from_filename(file_path)
+    if cols is None or len(cols) != arr.shape[1]:
+        return None, None
+    return cols, arr[np.argsort(arr[:, 0])]
+
+
+# ---------------------------------------------------------------------------
 # Case-parameter detection
 # ---------------------------------------------------------------------------
 def _read_internal_field(path):

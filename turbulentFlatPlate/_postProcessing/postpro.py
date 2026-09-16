@@ -145,40 +145,11 @@ def parse_theory_data(validation_file):
 # type (scalars, vectors, symmTensors), alphabetically within a type, and
 # skips fields the model does not have (e.g. k/omega for SA), so the column
 # layout differs per model and must come from the file name.
-_SYMM_TENSOR = ("xx", "xy", "xz", "yy", "yz", "zz")
-_PROFILE_FIELD_COLUMNS = {
-    "rho": ["rho"],
-    "yPlus": ["yPlus"],
-    "nut": ["nut"],
-    "nuTilda": ["nuTilda"],
-    "k": ["k"],
-    "omega": ["omega"],
-    "epsilon": ["epsilon"],
-    "U": ["Ux", "Uy", "Uz"],
-    "wallShearStress": ["tau_x", "tau_y", "tau_z"],
-    "R": [f"R_{c}" for c in _SYMM_TENSOR],                            # transported (RSM)
-    "turbulenceProperties:R": [f"R_tp_{c}" for c in _SYMM_TENSOR],   # turbulenceFields output
-}
+# The field -> column mapping and the filename parser live in _pp_common,
+# shared with profile_validation.py.
+_PROFILE_FIELD_COLUMNS = pp.PROFILE_FIELD_COLUMNS
+_profile_columns_from_filename = pp.profile_columns_from_filename
 
-
-def _profile_columns_from_filename(file_path):
-    """Derive column names from a `<set>_profile_<field>_<field>_....xy` filename
-    (sampleUyPlus / sampleUyPlusConv line sets, e.g. `x1_profile_...`).
-
-    The sets function object names its output after the sampled fields.  The
-    name is only trusted when it expands to the actual column count (checked
-    by the caller).  Returns a list of column names or None.
-    """
-    base = os.path.basename(file_path)
-    marker = "_profile_"
-    if marker not in base or not base.endswith(".xy"):
-        return None
-    cols = ["y"]
-    for token in base.split(marker, 1)[1][:-len(".xy")].split("_"):
-        if token not in _PROFILE_FIELD_COLUMNS:
-            return None
-        cols.extend(_PROFILE_FIELD_COLUMNS[token])
-    return cols
 
 def parse_sample_profile(sample_dir):
     """
