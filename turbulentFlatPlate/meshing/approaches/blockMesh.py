@@ -20,8 +20,11 @@ DOMAIN_HEIGHT = 1.0
 
 class BlockMeshApproach(Approach):
     name = "blockMesh"
-    defaults = {"firstLayerThickness": 1.0e-06, "n_y": 193, "n_x": 113,
-                "n_x_symmetry": 24}
+    # gradingX is the plate block's streamwise last/first cell ratio; with
+    # n_x 248 it puts dx at x = 1 m within ~2x of the gmsh meshes instead of
+    # ~11x (see the GRADING_X comment in base_case/system/blockMeshDict).
+    defaults = {"firstLayerThickness": 1.0e-06, "n_y": 193, "n_x": 248,
+                "n_x_symmetry": 24, "gradingX": 3.0}
 
     def generate(self, target_case, params):
         params = self.validate(params)
@@ -32,7 +35,8 @@ class BlockMeshApproach(Approach):
                                       DOMAIN_HEIGHT, n_y)
         grading = ratio ** (n_y - 1)
         dict_params = {"GRADING": f"{grading:.10g}", "n_y": n_y,
-                       "n_x": params["n_x"], "n_x_symmetry": params["n_x_symmetry"]}
+                       "n_x": params["n_x"], "n_x_symmetry": params["n_x_symmetry"],
+                       "GRADING_X": f'{params["gradingX"]:.10g}'}
         system_dir = target_case / "system"
         system_dir.mkdir(parents=True, exist_ok=True)
         lines = [f"{key} {dict_params[key]};" for key in sorted(dict_params)]

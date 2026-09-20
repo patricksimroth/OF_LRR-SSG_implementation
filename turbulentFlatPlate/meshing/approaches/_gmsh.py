@@ -32,7 +32,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ..common import VENV_PYTHON, stack_expansion_ratio
+from ..common import VENV_PYTHON, stack_total_thickness
 from .base import ApproachError
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -279,25 +279,29 @@ def merge_front_back(target):
 # 4. Prism layers + finish
 # ---------------------------------------------------------------------------
 def layer_geometry(p):
-    """(expansion ratio, outermost layer thickness, jump to the core).
+    """(expansion ratio, outermost layer thickness, jump to the core, height).
 
-    The stack is requested as first layer + overall height; the implied ratio
-    is what snappy actually receives.  The jump is the isotropic core cell size
-    over the outermost layer and has to stay small: the stack hands over to the
-    core inside the log layer, where a large step produces negative-k overshoots.
+    The stack is requested as first layer + expansion ratio + count, which is
+    what snappy receives verbatim; the overall height follows from them.  The
+    jump is the isotropic core cell size over the outermost layer and has to
+    stay small: the stack hands over to the core inside the log layer, where a
+    large step produces negative-k overshoots.
     """
-    first, total, n = (p["firstLayerThickness"], p["totalLayerThickness"],
-                       p["nPrisms"])
-    ratio = stack_expansion_ratio(first, total, n)
+    first, ratio, n = (p["firstLayerThickness"], float(p["expansionRatio"]),
+                       int(p["nPrisms"]))
+    total = stack_total_thickness(first, ratio, n)
     outermost = first * ratio ** (n - 1)
-    return ratio, outermost, p["wallCellSize"] / outermost
+    return ratio, outermost, p["wallCellSize"] / outermost, total
 
 
 def add_prism_layers(target, p):
-    """snappyHexMesh addLayers on bottomWall, absolute thicknesses."""
-    ratio, outermost, jump = layer_geometry(p)
-    print(f"    prisms: {p['nPrisms']} layers, stack {p['totalLayerThickness']:.3e} m, "
-          f"ratio {ratio:.3f}, outermost {outermost:.3e} m, "
+    """snappyHexMesh addLayers on bottomWall, absolute thicknesses.
+
+    Returns the derived stack geometry for the study manifest.
+    """
+    ratio, outermost, jump, total = layer_geometry(p)
+    print(f"    prisms: {p['nPrisms']} layers, ratio {ratio:.4f}, "
+          f"stack {total:.3e} m, outermost {outermost:.3e} m, "
           f"core/outermost {jump:.1f}x")
     if jump > 5.0:
         print(f"    [warn] prism stack hands over to the core at a {jump:.1f}x "
@@ -323,6 +327,9 @@ def add_prism_layers(target, p):
             f"prism layers placed on only {coverage:.1f}% of the wall faces - "
             f"snappy rejected the stack, see log.snappyHexMesh"
         )
+    return {"expansionRatio": round(ratio, 6),
+            "totalLayerThickness": round(total, 9),
+            "outermostLayer": round(outermost, 9)}
 
 
 def finalize(target, meta):

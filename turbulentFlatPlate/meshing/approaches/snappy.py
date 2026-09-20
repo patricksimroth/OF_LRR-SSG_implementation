@@ -24,10 +24,11 @@ snappy approach – full snappyHexMesh workflow over the whole domain.
   5. renumberMesh + checkMesh + patch-set check via _gmsh.finalize.
 
 Two v2512 traps this relies on:
-  - The stack is passed as firstLayerThickness + expansionRatio (solved from the
-    requested overall height).  With snappy's own `thickness` keyword the
-    layers are silently rolled back (0% extrusion) - that was the entire
-    "full-domain snappy cannot add layers" problem.
+  - The stack is passed as firstLayerThickness + expansionRatio + nPrisms,
+    which is also how it is requested (the overall height is derived).  With
+    snappy's own `thickness` keyword the layers are silently rolled back
+    (0% extrusion) - that was the entire "full-domain snappy cannot add
+    layers" problem.
   - snappy writes a 0/ directory; a stale 0/polyMesh shadows constant/polyMesh
     for every later tool (and crashes a re-run), so it is removed after each
     mesh-writing step.
@@ -36,7 +37,7 @@ import re
 import shutil
 from pathlib import Path
 
-from ..common import stack_expansion_ratio
+from ..common import stack_total_thickness
 from . import _gmsh
 from .base import Approach, ApproachError
 
@@ -246,18 +247,24 @@ def _plane_stl(x0, x1, z0, z1):
 class SnappyApproach(Approach):
     name = "snappy"
     defaults = {
-        # background box (near-cubic cells, face lines at x = 0 and y = 0)
-        "backgroundCellSize": 0.025,
+        # background box (near-cubic cells, face lines at x = 0 and y = 0).
+        # The wall cell is backgroundCellSize / 2**wallLevel = 5 mm, matching
+        # gmshTri/gmshHex wallCellSize so the three prism approaches differ in
+        # topology only.  h is snapped to Y_TOP / round(Y_TOP / h), and 0.02
+        # divides 1.0 exactly, so the requested size is what you get.
+        "backgroundCellSize": 0.02,
         # octree refinement toward the plate: wallLevel within refineDistance,
         # one level coarser per 3x that distance
         "wallLevel": 2,
         "refineDistance": 0.1,
         "nCellsBetweenLevels": 3,
         "depth": 0.1,
-        # prism stack, shared with gmshTri / gmshHex
-        "nPrisms": 40,
+        # prism stack, shared with gmshTri / gmshHex: first layer + expansion
+        # ratio + count, handed to snappy verbatim.  The overall height is
+        # derived (40 x 1e-6 at 1.2252 = 0.01498 m) and goes in the manifest.
+        "nPrisms": 50,
         "firstLayerThickness": 1.0e-06,
-        "totalLayerThickness": 0.015,
+        "expansionRatio": 1.17,
     }
 
     def generate(self, target_case, params):
@@ -290,8 +297,12 @@ class SnappyApproach(Approach):
                          for i in range(level))
         regions = (f"bottomAll {{ mode distance; levels ({bands}); }}"
                    if level > 0 else "")
-        ratio = stack_expansion_ratio(p["firstLayerThickness"],
-                                      p["totalLayerThickness"], int(p["nPrisms"]))
+        ratio = float(p["expansionRatio"])
+        total = stack_total_thickness(p["firstLayerThickness"], ratio,
+                                      int(p["nPrisms"]))
+        print(f"    prisms: {int(p['nPrisms'])} layers, ratio {ratio:.4f}, "
+              f"stack {total:.3e} m, outermost "
+              f"{p['firstLayerThickness'] * ratio ** (int(p['nPrisms']) - 1):.3e} m")
         (system / "snappyHexMeshDict").write_text(_fill(SNAPPY_DICT, {
             "@NBETWEEN@": int(p["nCellsBetweenLevels"]),
             "@LEVEL@": level,
@@ -334,6 +345,9 @@ class SnappyApproach(Approach):
             "params": p,
             "layer_coverage_pct": coverage,
             "expansionRatio": round(ratio, 6),
+            "totalLayerThickness": round(total, 9),
+            "outermostLayer": round(
+                p["firstLayerThickness"] * ratio ** (int(p["nPrisms"]) - 1), 9),
         })
         # finalize reads snappy's "Added" count, which here is the 3-D stage
         # (before the z collapse) - label it as such

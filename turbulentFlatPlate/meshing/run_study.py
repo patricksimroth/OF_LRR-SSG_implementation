@@ -42,6 +42,7 @@ from meshing.common import (
     RESULTS_ROOT,
     RUN_ROOT,
     VENV_PYTHON,
+    archive_run_data,
     build_libraries,
     combo_tag,
     copy_tree,
@@ -326,6 +327,13 @@ def _run_study(args, case_name, study_name, study_dir, approaches, by_name, plan
             print(f"  [done] {entry['run_dir']} in {elapsed:.0f}s")
 
     postproc_failed = run_postproc(CASE_DIR, run_case_dir)
+
+    # run/<case> is wiped by the next study, so the figures above would become
+    # unreproducible the moment another study starts.  Archive what the
+    # post-processing reads (see meshing/common.ARCHIVE_DIRS) alongside them.
+    archived = archive_run_data(run_case_dir, results_study_dir / "_rundata")
+    print(f"  raw data -> {results_study_dir / '_rundata'} "
+          f"({archived / 1e6:.0f} MB; see its REPRODUCE.md)")
 
     print("==========================================")
     if not (failed_mesh or solve_failed or postproc_failed):

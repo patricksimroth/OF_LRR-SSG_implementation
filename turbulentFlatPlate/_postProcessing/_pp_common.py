@@ -20,6 +20,12 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # Path resolution
 # ---------------------------------------------------------------------------
+# Set this to an archived study's `_rundata` folder to regenerate its figures
+# without re-running the solver (run_study.py writes one per study, with a
+# REPRODUCE.md next to it).
+RUN_DIR_ENV = "PP_RUN_CASE_DIR"
+
+
 def resolve_case_paths(script_dir):
     """Return (base_path, case_name, run_case_dir, source_case_dir, results_root).
 
@@ -48,6 +54,11 @@ def resolve_case_paths(script_dir):
             base_path = parent
             run_case_dir = base_path / "run" / case_name
             source_case_dir = script_dir
+    # Regenerating figures from an archived study: point every script at
+    # results/<case>/<study>/_rundata instead of the (wiped) run/ tree.
+    override = os.environ.get(RUN_DIR_ENV)
+    if override:
+        run_case_dir = Path(override).expanduser().resolve()
     results_root = base_path / "results" / case_name
     manifest = load_manifest(run_case_dir)
     if manifest and manifest.get("study"):

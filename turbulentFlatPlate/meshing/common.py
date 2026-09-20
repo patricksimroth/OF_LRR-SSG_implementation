@@ -80,6 +80,94 @@ def copy_tree(src, dst):
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
+# ---------------------------------------------------------------------------
+# Archiving a study's raw data (run/ is wiped by the next study)
+# ---------------------------------------------------------------------------
+# Per run dir: what the post-processing actually reads.  Everything omitted is
+# either a duplicate or regenerable - processor*/ is the decomposed copy of the
+# same mesh and fields (4x the size), 0/ is restore0Dir's copy of 0.orig/,
+# _dual/ is gmshHex scratch, and intermediate time dirs are already gone
+# (purgeWrite 1).
+ARCHIVE_DIRS = ("0.orig", "system", "constant", "postProcessing", "meshLogs")
+ARCHIVE_GLOBS = ("log.*", "p.foam")
+ARCHIVE_README = """\
+# Regenerating this study's figures
+
+`run/` is wiped by the next study, so this folder holds everything the
+post-processing reads: each run's case dicts (`0.orig/`, `system/`,
+`constant/` incl. `polyMesh`), its reconstructed latest time directory, the
+whole `postProcessing/` tree, and the solver and mesh logs.
+
+To rebuild every figure in the parent folder without re-running the solver:
+
+    source /home/patrick/OpenFOAM/patrick-v2512/run/.venv/bin/activate
+    export PP_RUN_CASE_DIR="$(pwd)"
+    cd <repo>/turbulentFlatPlate/_postProcessing
+    python3 postpro.py && python3 cf_validation.py && \\
+    python3 profile_validation.py && python3 bl_thickness.py && \\
+    python3 field_images.py && python3 dashboard.py
+
+`PP_RUN_CASE_DIR` overrides the run directory that
+`_pp_common.resolve_case_paths()` would otherwise derive; the study name still
+comes from `study_manifest.json` here, so the figures land back in this
+study's own results folder.
+
+Not a substitute for `provenance.json` one level up - that records which
+commit and which built libraries produced the data.
+"""
+
+
+def _latest_time_dir(case_dir):
+    """Highest-numbered time directory in case_dir, or None."""
+    times = []
+    for item in Path(case_dir).iterdir():
+        if item.is_dir():
+            try:
+                times.append((float(item.name), item))
+            except ValueError:
+                pass
+    return max(times, key=lambda t: t[0])[1] if times else None
+
+
+def archive_run_data(run_case_dir, dest_root):
+    """Copy every run's post-processing inputs into dest_root.
+
+    Without this the figures in results/ can never be regenerated or
+    re-examined - only re-run from scratch, which needs the same code AND the
+    same libraries.  Returns the number of bytes copied.
+    """
+    run_case_dir, dest_root = Path(run_case_dir), Path(dest_root)
+    if not run_case_dir.is_dir():
+        return 0
+    dest_root.mkdir(parents=True, exist_ok=True)
+
+    manifest = run_case_dir / "study_manifest.json"
+    if manifest.is_file():
+        shutil.copy2(manifest, dest_root / manifest.name)
+    (dest_root / "REPRODUCE.md").write_text(ARCHIVE_README)
+
+    for run in sorted(run_case_dir.iterdir()):
+        if not run.is_dir() or not (run / "system" / "controlDict").is_file():
+            continue
+        dest = dest_root / run.name
+        for name in ARCHIVE_DIRS:
+            if (run / name).is_dir():
+                copy_tree(run / name, dest / name)
+        # The reconstructed latest time: the fields the pvbatch scripts
+        # (field_images, bl_thickness) resample, and what run_completed()
+        # checks for.  0.orig is copied above; 0/ is its restore0Dir clone.
+        latest = _latest_time_dir(run)
+        if latest is not None and latest.name != "0":
+            copy_tree(latest, dest / latest.name)
+        for pattern in ARCHIVE_GLOBS:
+            for src in run.glob(pattern):
+                if src.is_file():
+                    dest.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dest / src.name)
+
+    return sum(f.stat().st_size for f in dest_root.rglob("*") if f.is_file())
+
+
 def run_foam(cmd, cwd, log_name):
     """Run an OpenFOAM application in cwd, stdout/stderr -> log file.
     Requires the OpenFOAM environment (run via run_study.sh)."""
@@ -105,13 +193,26 @@ def load_manifest(run_case_dir):
         return None
 
 
-def stack_expansion_ratio(first, total, n_layers):
-    """Expansion ratio r with first * (r**n - 1) / (r - 1) == total.
+def stack_total_thickness(first, ratio, n_layers):
+    """Overall height of an n-layer geometric stack: first * (r**n - 1)/(r - 1).
 
-    Approaches take the prism stack as its overall height, but it is handed to
-    snappyHexMesh as firstLayerThickness + expansionRatio: v2512's own
-    `thickness` keyword rejects the stack outright (0% extrusion even for a
-    stack that inserts at 100% via expansionRatio).
+    The prism approaches take the stack as firstLayerThickness + expansionRatio
+    + nPrisms, which is exactly what snappyHexMesh wants (v2512's own
+    `thickness` keyword rejects the stack outright - 0% extrusion even for a
+    stack that inserts at 100% via expansionRatio).  The overall height is a
+    derived quantity, reported in the manifest so bl_thickness.py can draw it
+    against delta99.
+    """
+    if abs(ratio - 1.0) < 1e-12:
+        return first * n_layers
+    return first * (ratio ** n_layers - 1.0) / (ratio - 1.0)
+
+
+def stack_expansion_ratio(first, total, n_layers):
+    """Inverse of stack_total_thickness: r such that the stack reaches `total`.
+
+    Only blockMesh needs this now - it fills a fixed domain height with n_y
+    cells and derives the blockMeshDict grading from the result.
     """
     lo, hi = 1.0 + 1e-12, 5.0
     for _ in range(200):

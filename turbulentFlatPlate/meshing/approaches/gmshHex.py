@@ -35,8 +35,8 @@ class GmshHexApproach(Approach):
         _gmsh.dualize(target_case, p)
         _gmsh.merge_front_back(target_case)
         _gmsh.set_patch_types(target_case)
-        _gmsh.add_prism_layers(target_case, p)
+        stack = _gmsh.add_prism_layers(target_case, p)
         return _gmsh.finalize(
             target_case, {"tool": "gmsh+polyDualMesh+snappy", "core": "polyDual",
-                          "params": p}
+                          "params": p, **stack}
         )

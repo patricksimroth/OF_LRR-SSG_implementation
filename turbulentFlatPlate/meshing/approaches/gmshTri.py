@@ -24,19 +24,24 @@ class GmshTriApproach(Approach):
         "yTop": 1.0,
         "depth": 0.1,
         # core sizing
-        "wallCellSize": 0.004,
+        # 5 mm matches snappy (backgroundCellSize/2**wallLevel) so all three
+        # prism approaches share one streamwise wall spacing.
+        "wallCellSize": 0.005,
         "farCellSize": 0.06,
         "distMin": 0.01,
         "distMax": 0.4,
-        # prism layers (absolute sizes).  nPrisms is set so the outermost layer
-        # lands within ~3x of wallCellSize: the stack has to hand over to the
-        # isotropic core smoothly, and an abrupt jump produces negative-k
-        # overshoots in the log layer that eventually blow the run up
-        # (nPrisms 30 gives a 20x jump and diverges around iteration 750).
-        # _gmsh.add_prism_layers warns when the ratio gets large.
-        "nPrisms": 40,
+        # Prism stack: first layer + expansion ratio + count, handed to snappy
+        # verbatim.  The overall height is derived (40 x 1e-6 at 1.2252 =
+        # 0.01498 m) and reported in the manifest.
+        # nPrisms is set so the outermost layer lands within ~3x of
+        # wallCellSize: the stack has to hand over to the isotropic core
+        # smoothly, and an abrupt jump produces negative-k overshoots in the
+        # log layer that eventually blow the run up (nPrisms 30 gives a 20x
+        # jump and diverges around iteration 750).  _gmsh.add_prism_layers
+        # warns when the ratio gets large.
+        "nPrisms": 50,
         "firstLayerThickness": 1.0e-06,
-        "totalLayerThickness": 0.015,   # overall stack height; ratio is derived
+        "expansionRatio": 1.17,
         "minThickness": 1.0e-09,
     }
 
@@ -46,7 +51,8 @@ class GmshTriApproach(Approach):
         _gmsh.run_gmsh(target_case)
         _gmsh.gmsh_to_foam(target_case)
         _gmsh.set_patch_types(target_case)
-        _gmsh.add_prism_layers(target_case, p)
+        stack = _gmsh.add_prism_layers(target_case, p)
         return _gmsh.finalize(
-            target_case, {"tool": "gmsh+snappy", "core": "tri", "params": p}
+            target_case, {"tool": "gmsh+snappy", "core": "tri", "params": p,
+                          **stack}
         )

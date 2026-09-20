@@ -47,9 +47,15 @@ def prism_stacks(manifest):
     """run_dir -> (layer height [m], coverage % or None) for runs with prisms."""
     stacks = {}
     for combo in (manifest or {}).get("combos", []):
-        height = (combo.get("params") or {}).get("totalLayerThickness")
+        # Derived from firstLayerThickness + expansionRatio + nPrisms by the
+        # approach, so it lives in the mesh metadata.  Older manifests
+        # requested it as a parameter instead - fall back to that.
+        mesh = combo.get("mesh") or {}
+        height = mesh.get("totalLayerThickness")
+        if height is None:
+            height = (combo.get("params") or {}).get("totalLayerThickness")
         if height is not None:
-            coverage = (combo.get("mesh") or {}).get("layer_coverage_pct")
+            coverage = mesh.get("layer_coverage_pct")
             stacks[combo.get("run_dir")] = (float(height), coverage)
     return stacks
 

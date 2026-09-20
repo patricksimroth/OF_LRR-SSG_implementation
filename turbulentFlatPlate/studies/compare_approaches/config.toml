@@ -16,11 +16,12 @@
 # core its own way (blockMesh grading, snappy octree refinement, gmsh size
 # fields), so the core controls live in per-approach blocks.
 #
-# The three prism-adding approaches share ONE stack, set in [params]: 40
-# layers, first layer 1e-6 m (y+ ~0.1), overall height 0.015 m; the expansion
-# ratio (~1.225) is derived from them.  blockMesh has no prisms but takes
-# firstLayerThickness too: its wall-normal GRADING is derived from it so the
-# wall cell (and wall y+) matches the prism stack.
+# The three prism-adding approaches share ONE stack, set in [params]: first
+# layer 1e-6 m (y+ ~0.1), expansion ratio 1.2252, 40 layers.  The overall stack
+# height follows from those three (14.98 mm) and is reported in the manifest,
+# not requested here.  blockMesh has no prisms but takes firstLayerThickness
+# too: its wall-normal GRADING is derived from it so the wall cell (and wall
+# y+) matches the prism stack.
 #
 # Prerequisite for gmshTri/gmshHex: gmsh in the project venv
 
@@ -28,28 +29,29 @@ models = ["SSGLRROmega2019"]
 approach = ["blockMesh", "snappy", "gmshTri", "gmshHex"]
 
 [params]
-nPrisms = 40
+nPrisms = 50
 firstLayerThickness = 1.0e-06
-totalLayerThickness = 0.015
+expansionRatio = 1.17 
 
 [params.blockMesh]
 n_y = 193
-n_x = 113
+n_x = 248
+gradingX = 3      # streamwise last/first cell ratio over the 2 m plate
 n_x_symmetry = 24
 
 [params.snappy]
-backgroundCellSize = 0.025   # background cubes; snappy refines them toward the plate
-wallLevel = 2                # octree level within refineDistance (6.25 mm cells)
+backgroundCellSize = 0.02    # background cubes; snappy refines them toward the plate
+wallLevel = 2                # octree level within refineDistance (5 mm wall cells)
 refineDistance = 0.1         # one level coarser per 3x that distance
 
 [params.gmshTri]
-wallCellSize = 0.004    # isotropic core size at the plate, relaxing to farCellSize
+wallCellSize = 0.005    # isotropic core size at the plate, relaxing to farCellSize
 farCellSize = 0.06
 distMin = 0.01
 distMax = 0.4
 
 [params.gmshHex]
-wallCellSize = 0.004
+wallCellSize = 0.005
 farCellSize = 0.06
 distMin = 0.01
 distMax = 0.4
