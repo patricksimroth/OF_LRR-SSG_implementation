@@ -28,36 +28,25 @@ divSchemes
 {
     default         none;
 
-    div(phi,U)      bounded Gauss linearUpwind grad(U);  //mehr gauss linear
-    // div(phi,U)      bounded Gauss upwind;
-    div(phid,p)         bounded Gauss linear;
-    // div(phi,p)      bounded Gauss upwind;
-    div(phi,p)      bounded Gauss linear;
-    
-    // Bounded, NOT plain Gauss linear: the central scheme is fine on the
-    // orthogonal blockMesh but oscillates on the unstructured gmsh cores,
-    // driving sensible e down to -2.5e5 (absolute T below zero) so rho=p/(RT)
-    // inverts and the pressure solve dies around iteration 800-1000.
-    // With this, gmshTri/gmshHex converge to Ux ~1e-8 and e_min matches the
-    // blockMesh baseline (-8.46e4 vs -8.48e4).
-    div(phi,e)          bounded Gauss limitedLinear 1;
-    div(phi,Ekp)        bounded Gauss linear;
-
-    turbulence        bounded Gauss limitedLinear 1;
-    div(phi,k)          $turbulence;
-    div(phi,epsilon)    $turbulence;
-    div(phi,omega)      $turbulence;
-    div(phi,nuTilda)    $turbulence;
-    div(phi,R)          $turbulence;
-
-    // Stress divergence, compressible forms only (rhoSimpleFoam).  The
-    // incompressible counterparts div(R), div((nu*dev2(T(grad(U))))) and
-    // div((nuEff*dev2(T(grad(U))))) were leftovers from simpleFoam runs: no
-    // compressible solver ever looks them up.
-    div(((rho*nuEff)*dev2(T(grad(U)))))               Gauss linear;  // eddy viscosity
-    div((rho*R))                                      Gauss linear;  // RSM
-    div(((rho*(thermo:mu|rho))*dev2(T(grad(U)))))     Gauss linear;  // RSM laminar part
-    div(devRhoReff)                                   Gauss linear;  // LRR (couplingFactor)
+    convection_solver                                 bounded Gauss linear;
+    div(phi,U)                                        bounded Gauss linearUpwind grad(U);  
+    div(phid,p)                                       $convection_solver;
+    div(phi,p)                                        $convection_solver;
+    div(phi,e)                                        bounded Gauss limitedLinear 1;
+    div(phi,Ekp)                                      $convection_solver;
+                        
+    convection_model                                  bounded Gauss limitedLinear 1;
+    div(phi,k)                                        $convection_model;
+    div(phi,epsilon)                                  $convection_model;
+    div(phi,omega)                                    $convection_model;
+    div(phi,nuTilda)                                  $convection_model;
+    div(phi,R)                                        $convection_model;
+                        
+    divergence                                        Gauss linear;  
+    div(((rho*nuEff)*dev2(T(grad(U)))))               $divergence;  // eddy viscosity
+    div((rho*R))                                      $divergence;  // RSM
+    div(((rho*(thermo:mu|rho))*dev2(T(grad(U)))))     $divergence;  // RSM laminar part
+    div(devRhoReff)                                   $divergence;  // LRR (couplingFactor)
 
 }
 

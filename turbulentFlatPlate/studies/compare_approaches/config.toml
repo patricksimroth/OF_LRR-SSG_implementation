@@ -16,22 +16,36 @@
 # core its own way (blockMesh grading, snappy octree refinement, gmsh size
 # fields), so the core controls live in per-approach blocks.
 #
-# The three prism-adding approaches share ONE stack, set in [params]: first
-# layer 1e-6 m (y+ ~0.1), expansion ratio 1.2252, 40 layers.  The overall stack
-# height follows from those three (14.98 mm) and is reported in the manifest,
-# not requested here.  blockMesh has no prisms but takes firstLayerThickness
-# too: its wall-normal GRADING is derived from it so the wall cell (and wall
-# y+) matches the prism stack.
+# The three prism-adding approaches share the SAME stack, and [params] sweeps
+# three of them.  First layer stays 1e-6 m (y+ ~0.1) in every set so the wall
+# cell is identical everywhere; only the count and the growth rate change.  The
+# overall height follows from those three numbers and is reported in the
+# manifest, not requested here.  blockMesh has no prisms but takes
+# firstLayerThickness too: its wall-normal GRADING is derived from it so the
+# wall cell (and wall y+) matches the prism stack.
 #
 # Prerequisite for gmshTri/gmshHex: gmsh in the project venv
 
-models = ["SSGLRROmega2019"]
+models = ["SpalartAllmarasSALSA"]
 approach = ["blockMesh", "snappy", "gmshTri", "gmshHex"]
 
 [params]
-nPrisms = 50
-firstLayerThickness = 1.0e-06
-expansionRatio = 1.17 
+firstLayerThickness = 1.0e-06    # fixed: same wall cell, same wall y+ everywhere
+expansionRatio = 1.17            # fixed: only the layer COUNT is swept
+
+# Sweeping nPrisms alone at a fixed ratio makes the stack height grow
+# EXPONENTIALLY (height ~ first * r^n / (r - 1)), so the usable range is
+# narrow - every +5 layers roughly doubles it:
+#    45 layers ->  6.9 mm
+#    50 layers -> 15.1 mm   (delta99 ~ 14.7 mm at x = 1 m)
+#    55 layers -> 33.1 mm   (covers delta99 ~ 27 mm at the trailing edge)
+# For reference, 80 layers would be 1.68 m and 120 layers 895 m, i.e. past the
+# 1 m domain - snappy would roll the layers back and the combo would fail the
+# <50% extrusion check.  To go taller, drop expansionRatio as well, which means
+# pairing the two in [[params.sets]] instead of a plain list.
+# blockMesh declares neither key, so all three collapse to ONE blockMesh run:
+# 1 + 3 x 3 = 10 combos per model.
+nPrisms = [5, 20, 40, 50]
 
 [params.blockMesh]
 n_y = 193

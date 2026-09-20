@@ -68,6 +68,13 @@ SA_FAMILY = ("SpalartAllmarasSALSA", "SpalartAllmaras")
 
 LOG_SCALE_VALUES = ("omega",)
 
+# An eddy-viscosity model carries no normal-stress anisotropy, so these three
+# are identically 2k/3 when they come from turbulenceProperties:R.
+NORMAL_STRESSES = ("Rxx", "Ryy", "Rzz")
+
+# Law-of-the-wall constants for the u+/y+ panels (same as postpro.py).
+KAPPA, B_LOG = 0.41, 5.0
+
 
 def station_from_tag(tag):
     """0.2 from `x0p2`, 1.0 from `x1`, 1.95 from `x1p95`."""
@@ -210,16 +217,128 @@ def plot_quantity(quantity, candidates, axis_label, runs, reference,
                        if column.startswith("R_tp_")})
     note = ""
     if fallback:
-        note = ("  -  " + ", ".join(DISPLAY_NAME.get(n, n) for n in fallback)
-                + ": modelled stresses (turbulenceProperties:R), not transported")
+        # Run names are long (<model>__<approach>); listing four of them
+        # overflows the figure width, so collapse the common case.
+        who = ("all runs" if len(fallback) == len(sources)
+               else ", ".join(DISPLAY_NAME.get(n, n) for n in fallback))
+        note = f"\n{who}: modelled stresses (turbulenceProperties:R)"
+        if quantity in NORMAL_STRESSES:
+            # Boussinesq gives R = (2/3)k I - nu_t dev(twoSymm(grad U)); in a
+            # thin shear layer the deviatoric normal parts are ~0, so all three
+            # normal stresses collapse onto 2k/3.  Saying so on the figure
+            # stops the flat Rxx = Ryy = Rzz curves reading as a bug.
+            note += ", isotropic by construction (= 2k/3)"
+        else:
+            note += ", not transported"
     fig.suptitle(f"{axis_label.split('  ')[0]} profiles vs {ref_label}{note}",
-                 fontsize=12)
+                 fontsize=11)
     fig.legend(handles, labels, loc="lower center",
                ncol=min(4, len(labels)), fontsize=9, frameon=False)
     fig.tight_layout(rect=(0, 0.06, 1, 0.96))
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     print(f"  {quantity:<6} -> {output_path}")
+    return True
+
+
+def uplus_yplus(profile, nu):
+    """(y+, u+) for one sampled station, or (None, None).
+
+    Same convention as postpro.compute_uplus_yplus so the two figures agree:
+    u_tau = max over the line of sqrt(|tau_x| / rho) - `wallShearStress` is a
+    volume field that is only non-zero at the wall, so the maximum along a
+    wall-normal line is the wall value - and y+ = y u_tau / nu with the
+    freestream nu = mu/rho from the case's thermophysicalProperties.
+    """
+    y, ux, tau = profile.get("y"), profile.get("Ux"), profile.get("tau_x")
+    if y is None or ux is None or tau is None:
+        return None, None
+    rho = profile.get("rho")
+    u_tau = float(np.sqrt(np.abs(tau / (rho if rho is not None else 1.0))).max())
+    if not np.isfinite(u_tau) or u_tau <= 0.0:
+        return None, None
+    return y * u_tau / nu, ux / u_tau
+
+
+def plot_uplus_yplus(runs, output_path, nu, colors, markers):
+    """u+ over y+ (semi-log) at every station, 2 x 5 grid, one line per run.
+
+    The references are the two universal ones - the viscous sublayer u+ = y+
+    and the log law - deliberately NOT the Coles profile that the single
+    station figure in postpro.py uses: that one is tabulated at Re_theta =
+    10000, which this plate only reaches near x = 1.2 m, so it would be wrong
+    on nine of the ten panels.
+    """
+    stations = sorted({s for profiles in runs.values() for s in profiles})
+    if not stations:
+        print("  [warn] no stations for u+/y+")
+        return False
+    n_cols = 5
+    n_rows = int(np.ceil(len(stations) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.0 * n_cols, 3.6 * n_rows),
+                             squeeze=False)
+    handles, labels = [], []
+    plotted_any = False
+
+    yp_visc = np.logspace(-1, np.log10(12.0), 40)
+    yp_log = np.logspace(np.log10(8.0), 4.2, 60)
+
+    for index, station in enumerate(stations):
+        ax = axes[index // n_cols][index % n_cols]
+        for name, profiles in runs.items():
+            profile = profiles.get(station)
+            if profile is None:
+                continue
+            yp, up = uplus_yplus(profile, nu)
+            if yp is None:
+                continue
+            mask = yp > 0
+            line, = ax.plot(yp[mask], up[mask],
+                            color=colors.get(name, "k"),
+                            marker=markers.get(name, "o"), markersize=3,
+                            markevery=max(1, int(mask.sum() // 12)),
+                            linewidth=1.2,
+                            label=DISPLAY_NAME.get(name, name))
+            plotted_any = True
+            if line.get_label() not in labels:
+                handles.append(line)
+                labels.append(line.get_label())
+
+        for xs, ys, style, lab in (
+                (yp_visc, yp_visc, dict(color="0.4", linestyle=":", linewidth=1.2),
+                 r"$u^+ = y^+$"),
+                (yp_log, np.log(yp_log) / KAPPA + B_LOG,
+                 dict(color="black", linestyle="--", linewidth=1.2),
+                 rf"log law ($\kappa$={KAPPA}, B={B_LOG})")):
+            line, = ax.plot(xs, ys, label=lab, **style)
+            if lab not in labels:
+                handles.append(line)
+                labels.append(lab)
+
+        ax.set_xscale("log")
+        ax.set_xlim(0.1, 2e4)
+        ax.set_ylim(0, 32)
+        ax.grid(True, alpha=0.3, which="both")
+        ax.set_title(f"x = {station:g} m", fontsize=10)
+        ax.set_xlabel(r"$y^+$", fontsize=9)
+        if index % n_cols == 0:
+            ax.set_ylabel(r"$u^+$")
+
+    for index in range(len(stations), n_rows * n_cols):
+        axes[index // n_cols][index % n_cols].axis("off")
+
+    if not plotted_any:
+        plt.close(fig)
+        print("  [warn] nothing to plot for u+/y+")
+        return False
+
+    fig.suptitle(r"$u^+$ over $y^+$ at the sampling stations", fontsize=12)
+    fig.legend(handles, labels, loc="lower center",
+               ncol=min(4, len(labels)), fontsize=9, frameon=False)
+    fig.tight_layout(rect=(0, 0.06, 1, 0.96))
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"  {'u+/y+':<6} -> {output_path}")
     return True
 
 
@@ -260,6 +379,9 @@ def main():
             quantity, candidates, axis_label, runs, rstress_ref, RSTRESS_LABEL,
             os.path.join(out_dir, f"profile_{quantity}.png"),
             u_inf, nu, colors, markers)
+
+    written += plot_uplus_yplus(
+        runs, os.path.join(out_dir, "profile_uplus_yplus.png"), nu, colors, markers)
 
     # Eddy viscosity of the SA family only - see the module docstring.
     quantity, candidates, axis_label = NUT_QUANTITY
