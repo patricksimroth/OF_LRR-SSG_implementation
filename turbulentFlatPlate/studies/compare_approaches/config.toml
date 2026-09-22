@@ -45,7 +45,7 @@ expansionRatio = 1.17            # fixed: only the layer COUNT is swept
 # pairing the two in [[params.sets]] instead of a plain list.
 # blockMesh declares neither key, so all three collapse to ONE blockMesh run:
 # 1 + 3 x 3 = 10 combos per model.
-nPrisms = [5, 20, 40, 50]
+nPrisms = [5,20,40,45,50]
 
 [params.blockMesh]
 n_y = 193

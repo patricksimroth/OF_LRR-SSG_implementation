@@ -60,6 +60,10 @@ def prism_stacks(manifest):
     return stacks
 
 
+# Extra figure width reserved for the right-hand legend, in inches.
+LEGEND_WIDTH_IN = 3.0
+
+
 def run_label(run_name, all_names):
     """Approach part of <model>__<approach> when every run shares the model."""
     models = {name.split("__", 1)[0] for name in all_names}
@@ -68,16 +72,21 @@ def run_label(run_name, all_names):
     return run_name
 
 
-def plot_comparison(records, case_name, out_path):
+def plot_comparison(records, case_name, out_path, manifest=None):
     """records: dicts with name, data (x, delta99, U_e), u_inf, nu, prism."""
-    fig, ax = plt.subplots(figsize=(10.5, 6.0))
+    fig, ax = plt.subplots(figsize=(10.5 + LEGEND_WIDTH_IN, 6.0))
     names = [r["name"] for r in records]
     model_names = {name.split("__", 1)[0] for name in names}
+    # Colour = mesh approach, marker = swept parameter, from the manifest; a
+    # 4 x 5 sweep is 20 curves and one colour each is unreadable.
+    colors, markers, sections = pp.study_styles(names, manifest)
 
-    for i, record in enumerate(records):
+    for record in records:
         data = record["data"]
-        ax.plot(data[:, 0], data[:, 1] * 1e3, color=f"C{i}", linewidth=1.6,
-                label=rf"$\delta_{{99}}$  {run_label(record['name'], names)}")
+        ax.plot(data[:, 0], data[:, 1] * 1e3,
+                color=colors.get(record["name"], "k"),
+                marker=markers.get(record["name"], None), markersize=4,
+                markevery=max(1, len(data) // 15), linewidth=1.6)
 
     x_ref = np.linspace(X_RANGE[0], X_RANGE[1], 400)
     references = sorted({(round(r["u_inf"], 6), float(f"{r['nu']:.6g}")) for r in records})
@@ -104,8 +113,8 @@ def plot_comparison(records, case_name, out_path):
     ax.set_xlim(0.0, X_RANGE[1])
     ax.set_ylim(bottom=0.0)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper left", fontsize=9)
-    fig.tight_layout()
+    rect = pp.legend_right(fig, sections, width_in=LEGEND_WIDTH_IN)
+    fig.tight_layout(rect=rect)
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
 
@@ -165,7 +174,8 @@ def main():
     if records:
         val_dir = results_root / "validation"
         val_dir.mkdir(parents=True, exist_ok=True)
-        plot_comparison(records, case_name, val_dir / PLOT_NAME)
+        plot_comparison(records, case_name, val_dir / PLOT_NAME,
+                        manifest=pp.load_manifest(run_case_dir))
         print(f"[bl_thickness] comparison plot -> {val_dir / PLOT_NAME}")
     if failed:
         print(f"[warn] boundary-layer thickness failed for: {failed}")

@@ -111,18 +111,34 @@ MODEL_COLORS = {
 }
 
 
+# Extra figure width reserved for the right-hand legend, in inches.
+LEGEND_WIDTH_IN = 3.0
+
+# Set by main() so the plot helpers can colour by mesh approach and mark by the
+# swept parameter instead of giving each of N runs its own colour.
+STUDY_MANIFEST = None
+
+
 def assign_plot_styles(models):
-    """(color, marker) per model: static registry first, tab10 cycle for
-    names without a registry entry (study combos, e.g. kOmegaSST__blockMesh_*)."""
+    """(color, marker, legend_sections) per run.
+
+    With a study manifest: colour = mesh approach, marker = swept parameter
+    (pp.study_styles), so a 4 x 5 sweep needs 9 legend entries, not 20.
+    Without one: the static per-model registry, then a tab10 cycle for names it
+    does not know (a plain run_simulation.sh variant).
+    """
+    models = sorted(set(models))
+    if STUDY_MANIFEST:
+        return pp.study_styles(models, STUDY_MANIFEST)
     colors = dict(MODEL_COLORS)
     markers = dict(MODEL_MARKERS)
-    extra = sorted(set(models) - set(colors))
     cmap = plt.get_cmap("tab10")
     marker_cycle = ("o", "s", "^", "D", "v", "P", "X", "*", "<", ">")
-    for i, name in enumerate(extra):
+    for i, name in enumerate([m for m in models if m not in colors]):
         colors[name] = cmap(i % cmap.N)
         markers[name] = marker_cycle[i % len(marker_cycle)]
-    return colors, markers
+    return colors, markers, [(None, [(DISPLAY_NAME.get(m, m), colors[m], markers[m])
+                                     for m in models])]
 
 
 # ---------------------------------------------------------------------------
@@ -336,8 +352,8 @@ def plot_cf_combined(records, reference, output_path, ref_station_x=REF_STATION_
     flat_plate_andre_v2's ``cf_plate_matrix.png`` (one subplot per model),
     here collapsing the row of subplots into a single comparison plot.
     """
-    fig, ax = plt.subplots(figsize=(9.5, 5.5))
-    colors, markers = assign_plot_styles(
+    fig, ax = plt.subplots(figsize=(9.5 + LEGEND_WIDTH_IN, 5.5))
+    colors, markers, sections = assign_plot_styles(
         r["model"] for r in records if r is not None)
     plotted_any = False
     for record in records:
@@ -376,8 +392,9 @@ def plot_cf_combined(records, reference, output_path, ref_station_x=REF_STATION_
     ax.set_ylabel(r"$C_f$")
     ax.set_title("Local skin-friction coefficient – all runs vs. TMR SST")
     ax.grid(True, alpha=0.3, which="both")
-    ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
+    rect = pp.legend_right(fig, sections + [("Reference", [
+        (TMR_REFERENCE_LABEL, "black", None)])], width_in=LEGEND_WIDTH_IN)
+    fig.tight_layout(rect=rect)
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
     print(f"  Cf plot     -> {output_path}")
@@ -391,8 +408,8 @@ def plot_yplus_combined(records, output_path):
     y-axis is logarithmic because the model matrix spans wall-resolved
     (y+ < 1) and wall-function (y+ > 30) meshes simultaneously.
     """
-    fig, ax = plt.subplots(figsize=(9.5, 5.5))
-    colors, markers = assign_plot_styles(
+    fig, ax = plt.subplots(figsize=(9.5 + LEGEND_WIDTH_IN, 5.5))
+    colors, markers, sections = assign_plot_styles(
         r["model"] for r in records if r is not None)
     plotted_any = False
     yp_all = []
@@ -433,8 +450,8 @@ def plot_yplus_combined(records, output_path):
     ax.set_ylabel(r"$y^+$")
     ax.set_title("Wall y+ along the plate – all models")
     ax.grid(True, alpha=0.3, which="both")
-    ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
+    rect = pp.legend_right(fig, sections, width_in=LEGEND_WIDTH_IN)
+    fig.tight_layout(rect=rect)
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
     print(f"  y+ plot     -> {output_path}")
@@ -552,6 +569,8 @@ def main():
     out_dir = os.path.join(results_root, "validation")
     os.makedirs(out_dir, exist_ok=True)
 
+    global STUDY_MANIFEST
+    STUDY_MANIFEST = pp.load_manifest(run_case_dir)
     plot_cf_combined(records, reference,
                      os.path.join(out_dir, "cf_validation.png"))
     plot_yplus_combined(records, os.path.join(out_dir, "yplus_validation.png"))

@@ -147,6 +147,9 @@ def parse_theory_data(validation_file):
 # layout differs per model and must come from the file name.
 # The field -> column mapping and the filename parser live in _pp_common,
 # shared with profile_validation.py.
+# Extra figure width reserved for the right-hand legend, in inches.
+LEGEND_WIDTH_IN = 3.0
+
 _PROFILE_FIELD_COLUMNS = pp.PROFILE_FIELD_COLUMNS
 _profile_columns_from_filename = pp.profile_columns_from_filename
 
@@ -243,7 +246,7 @@ def compute_uplus_yplus(df, nu, rho=None):
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
-def plot_uplus_yplus(theory, models_data, output_dir, coles=None):
+def plot_uplus_yplus(theory, models_data, output_dir, coles=None, manifest=None):
     """
     Plot u+ vs y+ (on log scale) for all models against the theoretical curves.
     Parameters
@@ -254,7 +257,7 @@ def plot_uplus_yplus(theory, models_data, output_dir, coles=None):
     coles       : optional (N, 2) array (y+, u+) from tmr_coles_upyp.dat
     """
     os.makedirs(output_dir, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=(10 + LEGEND_WIDTH_IN, 7))
     # Theory curves (convert from log10(y+) to y+)
     u_plus_th = theory["u_plus"]
     ax.plot(10**theory["log_y_inner"], u_plus_th,
@@ -265,24 +268,27 @@ def plot_uplus_yplus(theory, models_data, output_dir, coles=None):
         ax.plot(coles[:, 0], coles[:, 1],
                 color="tab:purple", linewidth=1.5,
                 label="Coles, Re_θ = 10 000 (Bardina et al., NASA TM-110446)")
-    # Simulation profiles (green = theory, purple = Coles reference)
-    prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    sim_colors = [c for c in prop_cycle
-                  if c.lower() not in ("#00ff00", "#008000", "#9467bd")]
-    for idx, (model_name, df) in enumerate(sorted(models_data.items())):
-        color = sim_colors[idx % len(sim_colors)]
+    # Colour = mesh approach, marker = swept parameter (study manifest).
+    colors, markers, sections = pp.study_styles(list(models_data), manifest)
+    for model_name, df in sorted(models_data.items()):
         valid = df[df["y_plus"] > 0].copy()
         ax.plot(valid["y_plus"], valid["u_plus"],
-                color=color, linewidth=1.8, label=f"{model_name}")
+                color=colors.get(model_name, "k"),
+                marker=markers.get(model_name, None), markersize=4,
+                markevery=max(1, len(valid) // 15), linewidth=1.8)
     ax.set_xscale("log")
     ax.set_xlabel("y+", fontsize=13)
     ax.set_ylabel("u+", fontsize=13)
     ax.set_title("Law of the Wall – u+ vs y+ (log scale)  [x = 1 m]", fontsize=14)
-    ax.legend(fontsize=11)
     ax.grid(True, linestyle="--", alpha=0.5, which="both")
     ax.set_xlim(0.1, 1e5)
     ax.set_ylim(0, 30)
-    fig.tight_layout()
+    refs = [("Reference", [("viscous sublayer (u+ = y+)", "green", None),
+                           ("log law (k=0.41, B=5.0)", "green", None)]
+             + ([("Coles, Re_theta = 10 000", "tab:purple", None)]
+                if coles is not None else []))]
+    rect = pp.legend_right(fig, sections + refs, width_in=LEGEND_WIDTH_IN)
+    fig.tight_layout(rect=rect)
     out_path = os.path.join(output_dir, "plot_uplus_yplus.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -504,7 +510,8 @@ if __name__ == "__main__":
     if theory and models_uplus:
         val_dir = os.path.join(results_root, "validation")
         print(f"\nGenerating u+/y+ validation plot in {val_dir} …")
-        plot_uplus_yplus(theory, models_uplus, val_dir, coles=coles)
+        plot_uplus_yplus(theory, models_uplus, val_dir, coles=coles,
+                         manifest=pp.load_manifest(run_case_dir))
 
         # --- Ux vs y profile plot ---
         print(f"Generating Ux vs y profile plot in {val_dir} …")

@@ -431,3 +431,125 @@ def solved_run_dirs(run_case_dir):
             failed.append(item.name)
     warn_failed(failed, "post-processing")
     return found
+
+
+# ---------------------------------------------------------------------------
+# Plot styling for study combos
+# ---------------------------------------------------------------------------
+# A study is <model>__<approach>[_<param><value>]... , so a 4-approach x
+# 5-layer sweep is 20 runs.  Giving each its own colour is unreadable, so
+# colour encodes the MESH APPROACH and the marker encodes the swept PARAMETER
+# value: 4 + 5 = 9 legend entries instead of 20.  Both come from the study
+# manifest, never from parsing run-dir names (combo_tag mangles values -
+# 1.0e-06 becomes "1em06"), so this stays correct whatever is swept.
+STYLE_COLORS = ("tab:blue", "tab:orange", "tab:green", "tab:red",
+                "tab:purple", "tab:brown", "tab:pink", "tab:olive",
+                "tab:gray", "tab:cyan")
+STYLE_MARKERS = ("o", "^", "s", "D", "v", "P", "X", "*", "<", ">")
+
+
+def combo_index(manifest):
+    """run_dir -> combo dict from a study manifest ({} without one)."""
+    if not manifest:
+        return {}
+    return {c["run_dir"]: c for c in manifest.get("combos", []) if c.get("run_dir")}
+
+
+def swept_keys(combos):
+    """Parameter keys that vary *within* at least one approach.
+
+    Keys that merely differ between approaches (n_y for blockMesh vs
+    wallCellSize for gmsh) are not a sweep and must not drive the markers.
+    """
+    by_approach = {}
+    for combo in combos:
+        by_approach.setdefault(combo.get("approach"), []).append(
+            combo.get("params") or {})
+    keys = set()
+    for params_list in by_approach.values():
+        for key in set().union(*(set(p) for p in params_list)) if params_list else ():
+            values = {repr(p.get(key)) for p in params_list}
+            if len(values) > 1:
+                keys.add(key)
+    return sorted(keys)
+
+
+def _variant_label(params, keys):
+    """'nPrisms=45' style label for the swept keys of one combo."""
+    parts = [f"{k}={params[k]:g}" if isinstance(params.get(k), float)
+             else f"{k}={params[k]}" for k in keys if k in params]
+    return ", ".join(parts)
+
+
+def study_styles(run_names, manifest):
+    """(colors, markers, legend_sections) for a set of run dirs.
+
+    colour -> mesh approach, marker -> swept parameter value.  Without a
+    usable manifest every run simply gets its own colour and marker, and the
+    legend collapses to a single section.  legend_sections is
+    [(title, [(label, colour, marker), ...]), ...] for legend_right().
+    """
+    names = sorted(run_names)
+    index = combo_index(manifest)
+    if not names or not all(n in index for n in names):
+        colors = {n: STYLE_COLORS[i % len(STYLE_COLORS)] for i, n in enumerate(names)}
+        markers = {n: STYLE_MARKERS[i % len(STYLE_MARKERS)] for i, n in enumerate(names)}
+        return colors, markers, [(None, [(n, colors[n], markers[n]) for n in names])]
+
+    keys = swept_keys([index[n] for n in names])
+    approaches, variants = [], []
+    for name in names:
+        approach = index[name].get("approach") or "?"
+        variant = _variant_label(index[name].get("params") or {}, keys)
+        if approach not in approaches:
+            approaches.append(approach)
+        if variant not in variants:
+            variants.append(variant)
+    approaches.sort()
+    # Numeric order where the labels are numeric ("nPrisms=45" < "nPrisms=120");
+    # plain alphabetical would put 120 before 45.
+    variants.sort(key=lambda v: ([float(t) for t in re.findall(r"[\d.]+", v)], v))
+
+    color_of = {a: STYLE_COLORS[i % len(STYLE_COLORS)] for i, a in enumerate(approaches)}
+    marker_of = {v: STYLE_MARKERS[i % len(STYLE_MARKERS)] for i, v in enumerate(variants)}
+    colors, markers = {}, {}
+    for name in names:
+        colors[name] = color_of[index[name].get("approach") or "?"]
+        markers[name] = marker_of[_variant_label(index[name].get("params") or {}, keys)]
+
+    sections = [("Mesh", [(a, color_of[a], None) for a in approaches])]
+    if len(variants) > 1 or (variants and variants[0]):
+        sections.append((", ".join(keys) or "variant",
+                         [(v or "(none)", "0.35", marker_of[v]) for v in variants]))
+    return colors, markers, sections
+
+
+def legend_right(fig, sections, width_in=2.6):
+    """Draw legend_sections to the RIGHT of the axes and reserve room for it.
+
+    Returns the rect to hand to fig.tight_layout(); the caller must apply it.
+    Section titles are rendered as bold headings inside one legend so the
+    colour block and the marker block stay visually separate.
+    """
+    from matplotlib.lines import Line2D
+
+    handles, labels = [], []
+    for title, entries in sections:
+        if title:
+            handles.append(Line2D([], [], linestyle="none", marker="none"))
+            labels.append(f"$\\bf{{{title.replace(' ', r'\ ')}}}$")
+        for entry in entries:
+            # (label, colour, marker[, linestyle]): without a linestyle, an
+            # entry is a line when it has no marker and a bare marker otherwise.
+            label, color, marker = entry[:3]
+            style = entry[3] if len(entry) > 3 else ("-" if marker is None else "none")
+            handles.append(Line2D([], [], color=color or "0.35",
+                                  marker=marker or "none", linestyle=style,
+                                  markerfacecolor="none" if style != "none" else None,
+                                  markersize=6, linewidth=1.8))
+            labels.append(label)
+    fig_w = fig.get_size_inches()[0]
+    right = max(0.55, 1.0 - width_in / fig_w)
+    fig.legend(handles, labels, loc="center left",
+               bbox_to_anchor=(right + 0.005, 0.5), frameon=False, fontsize=9)
+    return (0, 0, right, 1)

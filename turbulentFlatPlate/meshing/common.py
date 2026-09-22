@@ -98,22 +98,17 @@ post-processing reads: each run's case dicts (`0.orig/`, `system/`,
 `constant/` incl. `polyMesh`), its reconstructed latest time directory, the
 whole `postProcessing/` tree, and the solver and mesh logs.
 
-To rebuild every figure in the parent folder without re-running the solver:
+To redraw every figure in the parent folder without re-running the solver,
+from the repository root:
 
-    source /home/patrick/OpenFOAM/patrick-v2512/run/.venv/bin/activate
-    export PP_RUN_CASE_DIR="$(pwd)"
-    cd <repo>/turbulentFlatPlate/_postProcessing
-    python3 postpro.py && python3 cf_validation.py && \\
-    python3 profile_validation.py && python3 bl_thickness.py && \\
-    python3 field_images.py && python3 dashboard.py
+    ./run_postpro.sh results/<case>/<study>
+    ./run_postpro.sh results/<case>/<study> cf_validation profile_validation
 
-`PP_RUN_CASE_DIR` overrides the run directory that
-`_pp_common.resolve_case_paths()` would otherwise derive; the study name still
-comes from `study_manifest.json` here, so the figures land back in this
-study's own results folder.
-
-Not a substitute for `provenance.json` one level up - that records which
-commit and which built libraries produced the data.
+It runs the PERMANENT scripts in `<case>/_postProcessing/` (not copies) in the
+drivers' order, reading this folder through `PP_RUN_CASE_DIR`, and records in
+`../postpro_rerun.json` - per script - which commit drew each figure.  That is
+separate from `../provenance.json`, which describes the code that produced the
+DATA: a redraw with newer post-processing is expected to differ from it.
 """
 
 
