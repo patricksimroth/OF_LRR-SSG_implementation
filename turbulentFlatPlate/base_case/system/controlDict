@@ -20,6 +20,7 @@ libs
 (
     "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SSGLRROmega2019/lib/libSSGLRROmega2019Compressible.so"
     "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/SpalartAllmarasSALSA/lib/libSpalartAllmarasSALSACompressible.so"
+    "/home/patrick/OpenFOAM/patrick-v2512/run/test_cases/src/consecutiveCondition/lib/libconsecutiveCondition.so"
 );
 
 startFrom       startTime;
@@ -181,42 +182,65 @@ functions
         // BOTH hold.  A condition without a groupID defaults to -1, which
         // runTimeControl treats as sufficient on its own (ungrouped conditions
         // are ORed, not ANDed) - the residual gate would then do nothing.
+        //
+        // Each is wrapped in `consecutive` (src/consecutiveCondition): it is
+        // satisfied only after the wrapped condition held for nIter calls in
+        // a row, and one failing call resets its count.  Both wrappers count
+        // every iteration, so the group is met exactly when the average AND
+        // the residual gate have held together for the last 100 iterations.
+        // Without the hold the criterion fired on single-iteration dips:
+        // where an oscillating Cd crosses its own trailing mean, delta is ~0
+        // for a few iterations and the p residual can dip below 1e-4 there
+        // (gmshTri nPrisms30 stopped at 1143 inside a +-1 % limit cycle).
+        // Replayed on 57 Cd histories: 4 false stops without the hold, 0
+        // with it, at a cost of 0-300 iterations.
         conditions
         {
             integralCfAverage
             {
-                type            average;
-                functionObject  integralCf;
-                fields          (Cd);
-                // delta = |300-iteration window mean - current Cd|, absolute.
-                // The mean lags the current value, so delta ~ 150*dCd/diter:
-                // this measures the drift RATE, not the distance to the
-                // asymptote.  Cd ~ 5.7e-3 here, so 1e-6 is 1.8e-4 relative
-                // and stops every mesh within 0.07 % of its converged Cd.
-                // NOTE: absolute, so it is tied to Aref in integralCf - halve
-                // Aref and this tolerance loosens by 2x.
-                tolerance       1e-6;
-                window          300;
-                windowType      exact;
-                // Must be >= window (a partly filled window gives delta = 0 at
-                // iteration 1) and past the Cd overshoot: Cd peaks and turns
-                // over at ~700-850 on all four meshes, and where the curve
-                // crosses its own trailing mean delta collapses to zero.  On
-                // blockMesh that dip lasts a single iteration (855) at +6.3 %
-                // Cd error, which is exactly where nIterStartUp 500 would stop.
-                nIterStartUp    1000;
+                type            consecutive;
+                nIter           100;
                 groupID         1;
+                condition
+                {
+                    type            average;
+                    functionObject  integralCf;
+                    fields          (Cd);
+                    // delta = |300-iteration window mean - current Cd|,
+                    // absolute.  The mean lags the current value, so
+                    // delta ~ 150*dCd/diter: this measures the drift RATE,
+                    // not the distance to the asymptote.  Cd ~ 5.7e-3 here,
+                    // so 1e-6 is 1.8e-4 relative and stops every mesh within
+                    // ~0.1 % of its converged Cd.
+                    // NOTE: absolute, so it is tied to Aref in integralCf -
+                    // halve Aref and this tolerance loosens by 2x.
+                    tolerance       1e-6;
+                    window          300;
+                    windowType      exact;
+                    // Must be >= window (a partly filled window gives
+                    // delta = 0 at iteration 1) and past the Cd overshoot:
+                    // Cd peaks and turns over at ~700-850 on all four meshes,
+                    // and where the curve crosses its own trailing mean delta
+                    // collapses to zero.  The condition first reports true
+                    // at iteration 1003, so the earliest stop is 1102.
+                    nIterStartUp    1000;
+                }
             }
-            // Guards the criterion against those turning-point dips: at the
+            // Guards the criterion against turning-point dips: at the
             // blockMesh dip the p residual is 1.9e-3, far above this gate,
-            // while the genuinely converged stops sit at 1e-6 .. 2e-5.
+            // while the genuinely converged stops sit at 1e-7 .. 2e-5.
             pResidual
             {
-                type            equationInitialResidual;
-                fields          (p);
-                value           1e-4;
-                mode            minimum;
+                type            consecutive;
+                nIter           100;
                 groupID         1;
+                condition
+                {
+                    type            equationInitialResidual;
+                    fields          (p);
+                    value           1e-4;
+                    mode            minimum;
+                }
             }
         }
         satisfiedAction end;

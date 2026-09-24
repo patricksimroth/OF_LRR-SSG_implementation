@@ -30,9 +30,9 @@ PP_SRC="${SCRIPT_DIR}/${CASE}/_postProcessing"
 [ -d "${PP_SRC}" ]  || { echo "[error] no post-processing scripts at ${PP_SRC}"; exit 2; }
 [ -x "${VENV_PYTHON}" ] || { echo "[error] venv python not found: ${VENV_PYTHON}"; exit 2; }
 
-# The scripts derive results/<case>/<study> from the REPO root and the study
-# name in the archived manifest, not from this argument.  If either disagrees
-# with the folder given here, the figures would silently land elsewhere.
+# The scripts write into the parent of PP_RUN_CASE_DIR, but take the case name
+# and the reference data from this repo's <case>/_postProcessing, so the folder
+# must be results/<case>/<study> of THIS repo.
 EXPECTED="${SCRIPT_DIR}/results/${CASE}/${STUDY}"
 if [ "${STUDY_DIR}" != "${EXPECTED}" ]; then
     echo "[error] ${STUDY_DIR}"
@@ -42,8 +42,7 @@ fi
 MANIFEST_STUDY="$("${VENV_PYTHON}" -c "import json,sys; print(json.load(open(sys.argv[1]))['study'])" \
                   "${RUNDATA}/study_manifest.json" 2>/dev/null)"
 if [ "${MANIFEST_STUDY}" != "${STUDY}" ]; then
-    echo "[error] archived manifest says study '${MANIFEST_STUDY}', folder is '${STUDY}'"
-    exit 2
+    echo "[note] archived manifest names study '${MANIFEST_STUDY}' (folder renamed); redrawing into '${STUDY}'"
 fi
 
 # Script order: explicit subset if given, else everything the drivers would run.

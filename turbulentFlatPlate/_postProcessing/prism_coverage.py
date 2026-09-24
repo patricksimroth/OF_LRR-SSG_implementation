@@ -26,8 +26,9 @@ results/<case>/<study>/validation/:
   prism_coverage_prism_top.png
       Prism-top height h+ along the plate over the region bands.
 
-Only runs whose stack covers the boundary layer at X_RANGE[0] and is outgrown
-before X_RANGE[1] have an x_crit; the history figures show only those.
+Only runs whose stack covers the boundary layer at the first extracted station
+and is outgrown before the last one have an x_crit; the history figures show
+only those.
 
 Profiles are cell centroids (_pv_cell_profiles.py via pvbatch), not ParaView's
 point data: the reader's cell-to-point filter averages neighbouring cells
@@ -71,6 +72,7 @@ Y_FREE = 0.055
 TIMEOUT_S = 1800
 # Measured drift of Cf at the stop criterion - differences inside are noise.
 CF_BAND_PCT = 0.15
+HISTORY_YLIM_PCT = 100.0
 
 YP = np.logspace(-1, 4, 260)
 LOG_TOP = 0.2
@@ -214,11 +216,16 @@ def load(run_case_dir, results_root, runs, index, script_dir):
 
 
 def x_crit(X, d99, h):
-    """Station where the baseline delta99 first reaches h, or None when the
-    stack is already outgrown at X_RANGE[0] or still covers it at X_RANGE[1]."""
-    inside = (X >= X_RANGE[0]) & (X <= X_RANGE[1])
-    xs, ds = X[inside], d99[inside]
-    if not np.all(np.isfinite(ds)) or ds[0] > h or ds[-1] <= h:
+    """Station where the baseline delta99 first reaches h, or None.
+
+    Searched over the whole extracted range, not just the plotted X_RANGE: a
+    stack outgrown just upstream of X_RANGE[0] still has a well-defined x_crit
+    and belongs in the history figures.  None when the stack is outgrown before
+    the first station or still covers the boundary layer at the last one.
+    """
+    ok = np.isfinite(d99)
+    xs, ds = X[ok], d99[ok]
+    if len(xs) < 2 or ds[0] > h or ds[-1] <= h:
         return None
     k = int(np.argmax(ds > h))
     return float(xs[k - 1] + (h - ds[k - 1]) * (xs[k] - xs[k - 1]) / (ds[k] - ds[k - 1]))
@@ -377,6 +384,9 @@ def plot_history(data, B, index, approaches, out_path):
                 ax.axhspan(-CF_BAND_PCT, CF_BAND_PCT, color="0.88", zorder=0)
             if col == 0:
                 ax.set_ylabel(f"{sym} error [%]")
+    for row in axes:
+        lo, hi = row[0].get_ylim()
+        row[0].set_ylim(max(lo, -HISTORY_YLIM_PCT), min(hi, HISTORY_YLIM_PCT))
     fig.suptitle(rf"Signed error vs {ERROR_BASELINE} after the stack is outgrown (0 = $x_{{crit}}$, "
                  rf"where {ERROR_BASELINE} $\delta_{{99}}$ = h). $U_e$ = freestream. "
                  rf"Grey = Cf convergence band ±{CF_BAND_PCT:g} %.", fontsize=10)

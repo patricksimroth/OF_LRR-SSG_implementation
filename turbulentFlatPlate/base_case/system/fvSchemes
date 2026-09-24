@@ -40,7 +40,7 @@ divSchemes
     div(phi,k)                                        $convection_model;
     div(phi,epsilon)                                  $convection_model;
     div(phi,omega)                                    $convection_model;
-    div(phi,nuTilda)                                  $convection_model;
+    div(phi,nuTilda)                                  bounded Gauss linearUpwind grad(nuTilda);
     div(phi,R)                                        $convection_model;
                         
     divergence                                        Gauss linear;  

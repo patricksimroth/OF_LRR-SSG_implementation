@@ -56,9 +56,13 @@ def resolve_case_paths(script_dir):
             source_case_dir = script_dir
     # Regenerating figures from an archived study: point every script at
     # results/<case>/<study>/_rundata instead of the (wiped) run/ tree.
+    # The figures go back into the study folder that holds that _rundata, not
+    # the one the archived manifest names, so a renamed study redraws in place.
     override = os.environ.get(RUN_DIR_ENV)
     if override:
         run_case_dir = Path(override).expanduser().resolve()
+        if run_case_dir.name == "_rundata":
+            return base_path, case_name, run_case_dir, source_case_dir, run_case_dir.parent
     results_root = base_path / "results" / case_name
     manifest = load_manifest(run_case_dir)
     if manifest and manifest.get("study"):

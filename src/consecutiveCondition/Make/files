@@ -1,0 +1,3 @@
+consecutiveCondition.C
+
+LIB = $(PWD)/lib/libconsecutiveCondition

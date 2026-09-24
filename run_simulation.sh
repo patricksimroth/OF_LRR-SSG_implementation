@@ -103,6 +103,17 @@ if [ -d "src/SpalartAllmarasSALSA" ]; then
     (cd src/SpalartAllmarasSALSA && wmake libso) || echo "  [warn] custom model build failed"
 fi
 
+# 1d. Build the consecutive runTimeControl condition (the controlDict stop criterion needs it)
+if [ -d "src/consecutiveCondition" ]; then
+    echo "=========================================="
+    echo "Building runTimeControl condition (consecutiveCondition)..."
+    echo "=========================================="
+    if [ -z "$WM_PROJECT_DIR" ]; then
+        source /usr/lib/openfoam/openfoam2512/etc/bashrc
+    fi
+    (cd src/consecutiveCondition && wmake libso) || echo "  [warn] consecutiveCondition build failed"
+fi
+
 # 2. Find all directories at the root level
 for case_dir in *; do
     # Skip excluded directories (not simulation cases)
