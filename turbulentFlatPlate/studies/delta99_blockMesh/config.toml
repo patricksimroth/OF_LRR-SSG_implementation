@@ -1,0 +1,20 @@
+# Study: why blockMesh delta99 sits below the analytical / TMR boundary-layer
+# thickness.  Model (SALSA vs stock SA, the TMR reference model) x blockMesh
+# resolution.  n_x_symmetry is scaled with n_x so the leading-edge spacing on
+# both sides of x = 0 refines together (dx at the leading edge 4.4 -> 1.1 mm).
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/delta99_blockMesh
+
+models = ["SpalartAllmarasSALSA", "SpalartAllmaras"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+gradingX = 3
+sets = [
+    { n_x = 248, n_x_symmetry = 24, n_y = 193 },
+    { n_x = 496, n_x_symmetry = 48, n_y = 193 },
+    { n_x = 992, n_x_symmetry = 96, n_y = 193 },
+    { n_x = 248, n_x_symmetry = 24, n_y = 386 },
+    { n_x = 992, n_x_symmetry = 96, n_y = 386 },
+]

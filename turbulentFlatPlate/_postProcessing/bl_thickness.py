@@ -7,9 +7,11 @@ reaches 99 % of the local edge velocity) into
 results/<case>/<run>/boundary_layer/delta99.csv.  One comparison plot,
 results/<case>/validation/delta99_comparison.png, overlays
   - delta99(x) of every run,
-  - the analytical turbulent flat-plate reference delta = 0.37 x / Re_x^(1/5),
-    Re_x = U_inf x / nu (turbulent from the leading edge, as in these fully
-    turbulent RANS runs); one line per distinct (U_inf, nu),
+  - the composite-profile reference (_bl_theory.py: Spalding inner law +
+    Coles/Granville wake, momentum integral, turbulent from x = 0) - delta99
+    proper and the only reference drawn.  (The classic 0.37 x / Re_x^(1/5) is the
+    1/7 power-law thickness where u = U_e EXACTLY, not a 99 % thickness, and
+    sits ~20 % above both the composite and TMR's SA solution.)
   - dotted prism-layer heights from the study manifest (totalLayerThickness of
     snappy/gmshTri/gmshHex runs), one line per distinct height; blockMesh and
     runs without a manifest have no prism stack.
@@ -27,6 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+import _bl_theory as theory
 import _pp_common as pp
 
 EXTRACT_SCRIPT = "_pv_bl_thickness.py"
@@ -38,9 +41,9 @@ N_Y = 4001              # 2e-5 m wall-normal sampling
 TIMEOUT_S = 600
 
 
-def delta_turbulent_plate(x, u_inf, nu):
-    """Turbulent flat-plate correlation delta = 0.37 x / Re_x^(1/5)."""
-    return 0.37 * x / (u_inf * x / nu) ** 0.2
+def delta99_composite(x, u_inf, nu):
+    """delta99 of the composite profile + momentum integral (see _bl_theory)."""
+    return theory.delta99_composite(x, u_inf / nu)
 
 
 def prism_stacks(manifest):
@@ -90,12 +93,14 @@ def plot_comparison(records, case_name, out_path, manifest=None):
 
     x_ref = np.linspace(X_RANGE[0], X_RANGE[1], 400)
     references = sorted({(round(r["u_inf"], 6), float(f"{r['nu']:.6g}")) for r in records})
+    refs = []
     for j, (u_inf, nu) in enumerate(references):
-        ax.plot(x_ref, delta_turbulent_plate(x_ref, u_inf, nu) * 1e3,
-                color="k", linestyle=("--", "-.", (0, (5, 1, 1, 1)))[j % 3],
-                linewidth=1.3,
-                label=(r"analytical $0.37\,x\,/\,\mathrm{Re}_x^{1/5}$"
-                       f"  ($U_\\infty$ = {u_inf:g} m/s, $\\nu$ = {nu:.4g} m²/s)"))
+        cond = f"  ($U_\\infty$ = {u_inf:g} m/s, $\\nu$ = {nu:.4g} m²/s)"
+        ax.plot(x_ref, delta99_composite(x_ref, u_inf, nu) * 1e3,
+                color="k", linestyle="-", linewidth=2.0,
+                label=r"composite profile + momentum integral, $\delta_{99}$" + cond)
+        refs.append((r"composite $\delta_{99}$" + (f" ({u_inf:g} m/s)" if len(references) > 1 else ""),
+                     "black", None, "-"))
 
     heights = {}
     for record in records:
@@ -105,6 +110,8 @@ def plot_comparison(records, case_name, out_path, manifest=None):
     for k, (height, owners) in enumerate(sorted(heights.items())):
         ax.axhline(height * 1e3, color="0.35", linestyle=":", linewidth=1.6,
                    label=f"prism layer height {height * 1e3:g} mm ({', '.join(owners)})")
+    if heights:
+        refs.append(("prism stack top", "0.35", None, ":"))
 
     ax.set_xlabel(r"$x$  [m]")
     ax.set_ylabel(r"$\delta_{99}$  [mm]")
@@ -113,7 +120,7 @@ def plot_comparison(records, case_name, out_path, manifest=None):
     ax.set_xlim(0.0, X_RANGE[1])
     ax.set_ylim(bottom=0.0)
     ax.grid(True, alpha=0.3)
-    rect = pp.legend_right(fig, sections, width_in=LEGEND_WIDTH_IN)
+    rect = pp.legend_right(fig, sections + [("Reference", refs)], width_in=LEGEND_WIDTH_IN)
     fig.tight_layout(rect=rect)
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
@@ -165,10 +172,10 @@ def main():
         records.append({"name": run.name, "data": data, "u_inf": u_inf, "nu": nu,
                         "prism": prism})
         delta_at_1 = np.interp(1.0, data[:, 0], data[:, 1])
-        ref_at_1 = delta_turbulent_plate(1.0, u_inf, nu)
+        ref_at_1 = delta99_composite(1.0, u_inf, nu)
         prism_note = f", prism layer {prism[0] * 1e3:g} mm" if prism else ", no prism layer"
         print(f"  delta99(x=1) = {delta_at_1 * 1e3:.2f} mm "
-              f"(analytical {ref_at_1 * 1e3:.2f} mm, ratio {delta_at_1 / ref_at_1:.3f}), "
+              f"(composite {ref_at_1 * 1e3:.2f} mm, ratio {delta_at_1 / ref_at_1:.3f}), "
               f"delta99(x={data[-1, 0]:g}) = {data[-1, 1] * 1e3:.2f} mm{prism_note}")
 
     if records:

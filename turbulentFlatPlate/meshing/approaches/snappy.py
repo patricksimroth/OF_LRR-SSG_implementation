@@ -8,16 +8,25 @@ snappy approach – full snappyHexMesh workflow over the whole domain.
      then falls on a face edge).
   2. snappyHexMesh, all three stages in one pass, against an STL plane at y = 0
      spanning the whole bottom boundary:
-       castellate - octree refinement toward the plate (wallLevel within
-                    refineDistance, one level coarser per 3x that distance);
+       castellate - DIRECTIONAL refinement toward the plate, in x and y only
+                    (wallLevel within refineDistance, one level coarser per
+                    3x that distance, as nested boxes with levelIncrement);
                     cells below the plane are removed;
        snap       - the cut boundary is moved onto the plane;
        addLayers  - the prism stack on the plane.  The plane is ONE patch
                     (bottomAll) from inlet to outlet, so the stack never has to
                     taper to nothing at the leading edge.
-  3. Collapse to 2-D: octree refinement splits cells in z too, so the `back`
-     patch is re-extruded into a single cell of the case depth (extrudeMesh)
-     and moved onto z = 0 .. depth (the sampling planes sit at depth/2).
+  3. Collapse to 2-D: the `back` patch is re-extruded into a single cell of
+     the case depth (extrudeMesh) and moved onto z = 0 .. depth (the sampling
+     planes sit at depth/2).  The background is one cell deep, of the finest
+     cell size, so the wall cells are cubic during snap + addLayers.
+
+Directional, not isotropic, refinement: octree refinement also splits z, so
+each background cell turned into 2**wallLevel cells across the depth before
+the collapse - ~20M 3-D cells at wallLevel 5, past this machine's memory and
+snappy's maxGlobalCells (where snappy silently stops refining).  Directional
+refinement keeps z at one cell; the wall face count is checked afterwards
+against the requested level.
   4. topoSet + createPatch: bottomAll split by face centre into symmetry
      (x < 0, slip `patch`) and bottomWall (x > 0, wall); front + back ->
      frontAndBack (empty).
@@ -104,6 +113,7 @@ addLayers       true;
 geometry
 {
     bottomAll { type triSurfaceMesh; file "bottomAll.stl"; name bottomAll; }
+    @BOXES@
 }
 
 castellatedMeshControls
@@ -112,11 +122,11 @@ castellatedMeshControls
     maxGlobalCells      8000000;
     minRefinementCells  0;
     maxLoadUnbalance    0.1;
-    nCellsBetweenLevels @NBETWEEN@;
+    nCellsBetweenLevels 1;
     features            ();
     refinementSurfaces
     {
-        bottomAll { level (@LEVEL@ @LEVEL@); patchInfo { type wall; } }
+        bottomAll { level (0 0); patchInfo { type wall; } }
     }
     resolveFeatureAngle 30;
     refinementRegions
@@ -253,11 +263,10 @@ class SnappyApproach(Approach):
         # topology only.  h is snapped to Y_TOP / round(Y_TOP / h), and 0.02
         # divides 1.0 exactly, so the requested size is what you get.
         "backgroundCellSize": 0.02,
-        # octree refinement toward the plate: wallLevel within refineDistance,
+        # x-y refinement toward the plate: wallLevel within refineDistance,
         # one level coarser per 3x that distance
         "wallLevel": 2,
         "refineDistance": 0.1,
-        "nCellsBetweenLevels": 3,
         "depth": 0.1,
         # prism stack, shared with gmshTri / gmshHex: first layer + expansion
         # ratio + count, handed to snappy verbatim.  The overall height is
@@ -277,10 +286,12 @@ class SnappyApproach(Approach):
         # 1. background box.  h divides Y_TOP exactly, so a row boundary sits
         # at y = 0; the upstream / plate blocks meet at x = 0.
         h = Y_TOP / round(Y_TOP / p["backgroundCellSize"])
+        level = int(p["wallLevel"])
+        dz = h / 2 ** level
         (system / "blockMeshDict").write_text(_fill(BLOCK_MESH_DICT, {
             "@XI@": f"{X_INLET:.16g}", "@XO@": f"{X_OUTLET:.16g}",
             "@YMIN@": f"{-N_BELOW * h:.16g}", "@YTOP@": f"{Y_TOP:.16g}",
-            "@DZ@": f"{h:.16g}",
+            "@DZ@": f"{dz:.16g}",
             "@NUP@": max(1, round(-X_INLET / h)),
             "@NPLATE@": max(1, round(X_OUTLET / h)),
             "@NY@": round(Y_TOP / h) + N_BELOW,
@@ -292,11 +303,17 @@ class SnappyApproach(Approach):
         _gmsh._foam(["blockMesh"], target, "log.blockMesh")
 
         # 2. castellate + snap + layers
-        level = int(p["wallLevel"])
-        bands = " ".join(f"({p['refineDistance'] * 3 ** i:.6g} {level - i})"
-                         for i in range(level))
-        regions = (f"bottomAll {{ mode distance; levels ({bands}); }}"
-                   if level > 0 else "")
+        # one box per level band, all from y = 0 (the rows below the plate
+        # are cut away anyway); 'distance' mode is not supported for
+        # directional refinement
+        boxes, regions = [], []
+        for i in range(level):
+            top = p["refineDistance"] * 3 ** i
+            boxes.append(f"refineBox{i} {{ type searchableBox; "
+                         f"min ({X_INLET - 1.0:.16g} 0 -1); "
+                         f"max ({X_OUTLET + 1.0:.16g} {top:.16g} 1); }}")
+            regions.append(f"refineBox{i} {{ mode inside; levels ((1e15 0)); "
+                           f"levelIncrement (0 0 ({level - i} {level - i} 0)); }}")
         ratio = float(p["expansionRatio"])
         total = stack_total_thickness(p["firstLayerThickness"], ratio,
                                       int(p["nPrisms"]))
@@ -304,11 +321,10 @@ class SnappyApproach(Approach):
               f"stack {total:.3e} m, outermost "
               f"{p['firstLayerThickness'] * ratio ** (int(p['nPrisms']) - 1):.3e} m")
         (system / "snappyHexMeshDict").write_text(_fill(SNAPPY_DICT, {
-            "@NBETWEEN@": int(p["nCellsBetweenLevels"]),
-            "@LEVEL@": level,
-            "@REGIONS@": regions,
-            # off every face at any refinement level up to 3
-            "@LOCATION@": f"(1.0123 0.5037 {0.3123 * h:.9g})",
+            "@BOXES@": "\n    ".join(boxes),
+            "@REGIONS@": "\n        ".join(regions),
+            # off every face at any refinement level
+            "@LOCATION@": f"(1.0123 0.5037 {0.3123 * dz:.9g})",
             "@NPRISMS@": int(p["nPrisms"]),
             "@FIRST@": f"{p['firstLayerThickness']:.16g}",
             "@RATIO@": f"{ratio:.9f}",
@@ -338,6 +354,17 @@ class SnappyApproach(Approach):
                                 "- see log.createPatch")
         shutil.rmtree(target / "0", ignore_errors=True)
         _gmsh.set_patch_types(target)
+
+        # snappy stops refining at maxGlobalCells without failing, so check
+        # that the plate really carries the requested wall cell size
+        boundary = (target / "constant" / "polyMesh" / "boundary").read_text()
+        wall = re.search(r"bottomWall\s*\{[^}]*?nFaces\s+(\d+);", boundary)
+        expected = round(X_OUTLET / h) * 2 ** level
+        if not wall or int(wall.group(1)) != expected:
+            raise ApproachError(
+                f"bottomWall has {wall.group(1) if wall else '?'} faces, expected "
+                f"{expected} for wallLevel {level} - refinement was capped, see "
+                f"log.snappyHexMesh")
 
         # 5. renumber, check, patch-set assertion, manifest metadata
         meta = _gmsh.finalize(target, {

@@ -1,0 +1,15 @@
+# Study: SALSA vs stock SA on the base blockMesh, with the Ux-gated stop
+# criterion (base_case/system/controlDict, UxResidual).  The 248 x 193 mesh is
+# converged for delta99, theta and Cf to <= 0.4 % (studies/delta99_blockMesh).
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/sa_vs_salsa
+
+models = ["SpalartAllmarasSALSA", "SpalartAllmaras"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+n_x = 248
+n_x_symmetry = 24
+n_y = 193
+gradingX = 3

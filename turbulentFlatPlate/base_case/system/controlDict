@@ -242,6 +242,28 @@ functions
                     mode            minimum;
                 }
             }
+            // Guards against slow turnovers.  On fine meshes (blockMesh n_y
+            // 386) Cd overshoots and turns over so slowly that the average
+            // reads ~0 for hundreds of iterations while p is already below
+            // 1e-4: stock SA stopped at 3240 with Cd +2.7 %.  Ux is the
+            // separating residual: 2e-5 at that false stop, <= 5e-7 at every
+            // genuine core_refinement stop.  Replayed: the false stop moves
+            // to 8892 (+0.24 %), all other replayed stops are unchanged.
+            // U.component(0) = Ux only; plain (U) takes the max over components and
+            // Uy sits at ~1e-5 even when converged.
+            UxResidual
+            {
+                type            consecutive;
+                nIter           100;
+                groupID         1;
+                condition
+                {
+                    type            equationInitialResidual;
+                    fields          (U.component(0));
+                    value           2e-6;
+                    mode            minimum;
+                }
+            }
         }
         satisfiedAction end;
     }

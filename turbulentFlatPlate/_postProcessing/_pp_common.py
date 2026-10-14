@@ -501,9 +501,15 @@ def study_styles(run_names, manifest):
         return colors, markers, [(None, [(n, colors[n], markers[n]) for n in names])]
 
     keys = swept_keys([index[n] for n in names])
+    multi_model = len({index[n].get("model") for n in names}) > 1
+
+    def colour_key(name):
+        approach = index[name].get("approach") or "?"
+        return f"{index[name].get('model')}, {approach}" if multi_model else approach
+
     approaches, variants = [], []
     for name in names:
-        approach = index[name].get("approach") or "?"
+        approach = colour_key(name)
         variant = _variant_label(index[name].get("params") or {}, keys)
         if approach not in approaches:
             approaches.append(approach)
@@ -518,10 +524,11 @@ def study_styles(run_names, manifest):
     marker_of = {v: STYLE_MARKERS[i % len(STYLE_MARKERS)] for i, v in enumerate(variants)}
     colors, markers = {}, {}
     for name in names:
-        colors[name] = color_of[index[name].get("approach") or "?"]
+        colors[name] = color_of[colour_key(name)]
         markers[name] = marker_of[_variant_label(index[name].get("params") or {}, keys)]
 
-    sections = [("Mesh", [(a, color_of[a], None) for a in approaches])]
+    sections = [("Model, mesh" if multi_model else "Mesh",
+                 [(a, color_of[a], None) for a in approaches])]
     if len(variants) > 1 or (variants and variants[0]):
         sections.append((", ".join(keys) or "variant",
                          [(v or "(none)", "0.35", marker_of[v]) for v in variants]))
@@ -541,7 +548,8 @@ def legend_right(fig, sections, width_in=2.6):
     for title, entries in sections:
         if title:
             handles.append(Line2D([], [], linestyle="none", marker="none"))
-            labels.append(f"$\\bf{{{title.replace(' ', r'\ ')}}}$")
+            escaped = title.replace(' ', r'\ ').replace('_', r'\_')
+            labels.append(f"$\\bf{{{escaped}}}$")
         for entry in entries:
             # (label, colour, marker[, linestyle]): without a linestyle, an
             # entry is a line when it has no marker and a bare marker otherwise.

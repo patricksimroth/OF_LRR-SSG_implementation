@@ -86,6 +86,7 @@ DISPLAY_NAME = {
     "kOmegaSST_andre": "k-omega SST (andre)",
     "SSGLRROmega2019": "SSG/LRR-omega 2019 (SD)",
     "SpalartAllmarasSALSA": "SA SALSA",
+    "SpalartAllmaras": "SA",
 }
 
 # Markers per model for the combined plot (chosen to be readable in print).
@@ -97,6 +98,7 @@ MODEL_MARKERS = {
     "kOmegaSST_andre": "v",
     "SSGLRROmega2019": "P",
     "SpalartAllmarasSALSA": "*",
+    "SpalartAllmaras": "o",
 }
 
 # Colours per model for the combined plot.
@@ -108,6 +110,7 @@ MODEL_COLORS = {
     "kOmegaSST_andre": "tab:purple",
     "SSGLRROmega2019": "tab:brown",
     "SpalartAllmarasSALSA": "tab:cyan",
+    "SpalartAllmaras": "tab:olive",
 }
 
 

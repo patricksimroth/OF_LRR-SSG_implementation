@@ -45,22 +45,20 @@ def format_value(value):
 def expand_params(params):
     """Expand [params] into concrete parameter dicts.
 
-    `sets` (list of dicts) -> one entry per set, merged over the scalar keys.
-    Otherwise list-valued keys are swept (cartesian product), scalar keys are
-    merged into every combination.
+    List-valued keys are swept (cartesian product), scalar keys are merged
+    into every combination.  `sets` (list of dicts) is one more sweep axis:
+    every set is crossed with the list-valued keys and wins over them.
     """
     fixed = {k: v for k, v in params.items() if k != "sets" and not isinstance(v, list)}
-    sets = params.get("sets")
-    if sets:
-        return [{**fixed, **combo} for combo in sets]
+    sets = params.get("sets") or [{}]
     swept_keys = sorted(k for k, v in params.items() if k != "sets" and isinstance(v, list))
-    if not swept_keys:
-        return [dict(fixed)]
     combos = []
     for values in product(*(params[k] for k in swept_keys)):
-        combo = dict(fixed)
-        combo.update(dict(zip(swept_keys, values)))
-        combos.append(combo)
+        for combo_set in sets:
+            combo = dict(fixed)
+            combo.update(dict(zip(swept_keys, values)))
+            combo.update(combo_set)
+            combos.append(combo)
     return combos
 
 
