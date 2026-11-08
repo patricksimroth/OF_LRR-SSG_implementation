@@ -26,10 +26,10 @@ This script mirrors the methodology used in
   reference station ``x = 0.97008`` and the log-law RMS error of the
   ``u+``/``y+`` profile is computed in the range ``y+ in [30, 300]``.
 
-The figure layout differs from the reference: instead of one subplot per
-model (the reference produces a row of subplots because it also spans
-multiple grids), this script produces **a single ``Cf`` versus ``x`` plot
-containing every available model** plus the TMR reference.
+Output: summary/tables/wall_metrics.csv and .txt (one row per run).  The
+plots this script used to draw are gone: Cf(x) and wall y+ along the plate
+per approach and core size are summary/along_plate/{cf,yplus}.png of the
+study's analyze.py.
 """
 
 from __future__ import annotations
@@ -39,14 +39,6 @@ import math
 import os
 import re
 import sys
-
-# pyrefly: ignore [missing-import]
-import matplotlib
-
-matplotlib.use("Agg")
-
-# pyrefly: ignore [missing-import]
-import matplotlib.pyplot as plt
 
 # pyrefly: ignore [missing-import]
 import numpy as np
@@ -88,61 +80,6 @@ DISPLAY_NAME = {
     "SpalartAllmarasSALSA": "SA SALSA",
     "SpalartAllmaras": "SA",
 }
-
-# Markers per model for the combined plot (chosen to be readable in print).
-MODEL_MARKERS = {
-    "LRR": "s",
-    "SSG": "X",
-    "kEpsilon": "D",
-    "kOmegaSST": "^",
-    "kOmegaSST_andre": "v",
-    "SSGLRROmega2019": "P",
-    "SpalartAllmarasSALSA": "*",
-    "SpalartAllmaras": "o",
-}
-
-# Colours per model for the combined plot.
-MODEL_COLORS = {
-    "LRR": "tab:blue",
-    "SSG": "tab:orange",
-    "kEpsilon": "tab:green",
-    "kOmegaSST": "tab:red",
-    "kOmegaSST_andre": "tab:purple",
-    "SSGLRROmega2019": "tab:brown",
-    "SpalartAllmarasSALSA": "tab:cyan",
-    "SpalartAllmaras": "tab:olive",
-}
-
-
-# Extra figure width reserved for the right-hand legend, in inches.
-LEGEND_WIDTH_IN = 3.0
-
-# Set by main() so the plot helpers can colour by mesh approach and mark by the
-# swept parameter instead of giving each of N runs its own colour.
-STUDY_MANIFEST = None
-
-
-def assign_plot_styles(models):
-    """(color, marker, legend_sections) per run.
-
-    With a study manifest: colour = mesh approach, marker = swept parameter
-    (pp.study_styles), so a 4 x 5 sweep needs 9 legend entries, not 20.
-    Without one: the static per-model registry, then a tab10 cycle for names it
-    does not know (a plain run_simulation.sh variant).
-    """
-    models = sorted(set(models))
-    if STUDY_MANIFEST:
-        return pp.study_styles(models, STUDY_MANIFEST)
-    colors = dict(MODEL_COLORS)
-    markers = dict(MODEL_MARKERS)
-    cmap = plt.get_cmap("tab10")
-    marker_cycle = ("o", "s", "^", "D", "v", "P", "X", "*", "<", ">")
-    for i, name in enumerate([m for m in models if m not in colors]):
-        colors[name] = cmap(i % cmap.N)
-        markers[name] = marker_cycle[i % len(marker_cycle)]
-    return colors, markers, [(None, [(DISPLAY_NAME.get(m, m), colors[m], markers[m])
-                                     for m in models])]
-
 
 # ---------------------------------------------------------------------------
 # Reference data parsing (Techplot .dat format used by the TMR repository)
@@ -263,6 +200,20 @@ def find_profile_file(case_dir):
     return None
 
 
+def cf_curve(case_dir):
+    """(x, Cf) along the plate for one run, sorted by x, or (None, None)."""
+    shear_path, _name = find_wall_shear_file(case_dir)
+    if shear_path is None:
+        return None, None
+    shear = pp.read_numeric_rows(shear_path)
+    if shear is None:
+        return None, None
+    u_inf, _nu, rho = pp.detect_case_parameters(case_dir, fallback_u_inf=U_INF_DEFAULT,
+                                                fallback_nu=NU_DEFAULT)
+    order = np.argsort(shear[:, 0])
+    return shear[order, 0], compute_cf_from_shear(shear[order, 3:6], rho=rho, u_inf=u_inf)
+
+
 def process_model(model_name, case_dir, reference, ref_station_x=REF_STATION_X):
     """Build the per-model record used for the plots and the summary table."""
     record = {"model": model_name, "display": DISPLAY_NAME.get(model_name, model_name)}
@@ -343,121 +294,6 @@ def process_model(model_name, case_dir, reference, ref_station_x=REF_STATION_X):
             record["profile_source"] = os.path.relpath(profile_path, case_dir)
 
     return record
-
-
-# ---------------------------------------------------------------------------
-# Plotting
-# ---------------------------------------------------------------------------
-def plot_cf_combined(records, reference, output_path, ref_station_x=REF_STATION_X):
-    """Single Cf-vs-x plot with every model and the TMR reference overlaid.
-
-    This is the test_cases equivalent of
-    flat_plate_andre_v2's ``cf_plate_matrix.png`` (one subplot per model),
-    here collapsing the row of subplots into a single comparison plot.
-    """
-    fig, ax = plt.subplots(figsize=(9.5 + LEGEND_WIDTH_IN, 5.5))
-    colors, markers, sections = assign_plot_styles(
-        r["model"] for r in records if r is not None)
-    plotted_any = False
-    for record in records:
-        if record is None or "x" not in record:
-            continue
-        marker = markers.get(record["model"], "o")
-        color = colors.get(record["model"], "k")
-        # Keep only the physically meaningful domain (skip leading edge spike).
-        mask = (record["x"] >= 0.05) & (record["x"] <= 1.95)
-        ax.plot(record["x"][mask], record["cf"][mask],
-                color=color, marker=marker, markersize=3.5,
-                markevery=max(1, mask.sum() // 25),
-                linewidth=1.2, label=record["display"])
-        plotted_any = True
-
-    # The one TMR reference, drawn once and labelled.
-    if reference is not None:
-        mask = (reference[:, 0] >= 0.05) & (reference[:, 0] <= 1.95)
-        ax.plot(reference[mask, 0], reference[mask, 1],
-                color="black", linestyle="--", linewidth=1.2, alpha=0.7,
-                label=TMR_REFERENCE_LABEL)
-        plotted_any = True
-
-    if plotted_any:
-        # Mark the reference station used for the table.
-        for record in records:
-            if record is None or "station_x" not in record:
-                continue
-            color = colors.get(record["model"], "k")
-            ax.axvline(record["station_x"], color=color, alpha=0.10, linewidth=0.6)
-        ax.axvline(ref_station_x, color="grey", alpha=0.25,
-                   linewidth=0.8, linestyle=":",
-                   label=f"reference station x = {ref_station_x:g}")
-
-    ax.set_xlabel(r"$x$  [m]")
-    ax.set_ylabel(r"$C_f$")
-    ax.set_title("Local skin-friction coefficient – all runs vs. TMR SST")
-    ax.grid(True, alpha=0.3, which="both")
-    rect = pp.legend_right(fig, sections + [("Reference", [
-        (TMR_REFERENCE_LABEL, "black", None)])], width_in=LEGEND_WIDTH_IN)
-    fig.tight_layout(rect=rect)
-    fig.savefig(output_path, dpi=180)
-    plt.close(fig)
-    print(f"  Cf plot     -> {output_path}")
-
-
-def plot_yplus_combined(records, output_path):
-    """Single wall-y+-versus-x plot with every model overlaid.
-
-    Uses the same sampled ``yPlus_bottomWall.raw`` data as the summary
-    table (``yPlus_reference_2``, falling back to ``samplePlate``).  The
-    y-axis is logarithmic because the model matrix spans wall-resolved
-    (y+ < 1) and wall-function (y+ > 30) meshes simultaneously.
-    """
-    fig, ax = plt.subplots(figsize=(9.5 + LEGEND_WIDTH_IN, 5.5))
-    colors, markers, sections = assign_plot_styles(
-        r["model"] for r in records if r is not None)
-    plotted_any = False
-    yp_all = []
-    for record in records:
-        if record is None or "yp_x" not in record:
-            continue
-        marker = markers.get(record["model"], "o")
-        color = colors.get(record["model"], "k")
-        # Keep only the physically meaningful domain (skip leading edge spike).
-        mask = (record["yp_x"] >= 0.05) & (record["yp_x"] <= 1.95)
-        if not mask.any():
-            continue
-        yp_all.append(record["yp"][mask])
-        ax.plot(record["yp_x"][mask], record["yp"][mask],
-                color=color, marker=marker, markersize=3.5,
-                markevery=max(1, mask.sum() // 25),
-                linewidth=1.2, label=record["display"])
-        plotted_any = True
-
-    if plotted_any:
-        ax.set_yscale("log")
-        # Automatic y range from the model data only, so the reference lines
-        # cannot stretch the axis into empty regions.
-        yp_cat = np.concatenate(yp_all)
-        yp_cat = yp_cat[yp_cat > 0]
-        if yp_cat.size:
-            ax.set_ylim(yp_cat.min() / 1.5, yp_cat.max() * 1.5)
-            # Mesh-regime reference lines: y+ = 1 (viscous sublayer
-            # resolution) and y+ = 30 (log-law wall-function range), drawn
-            # only when they fall inside the data range.
-            for y_ref, style, label in ((1.0, "--", r"$y^+ = 1$"),
-                                        (30.0, ":", r"$y^+ = 30$")):
-                if yp_cat.min() <= y_ref <= yp_cat.max():
-                    ax.axhline(y_ref, color="grey", linestyle=style,
-                               linewidth=0.8, alpha=0.55, label=label)
-
-    ax.set_xlabel(r"$x$  [m]")
-    ax.set_ylabel(r"$y^+$")
-    ax.set_title("Wall y+ along the plate – all models")
-    ax.grid(True, alpha=0.3, which="both")
-    rect = pp.legend_right(fig, sections, width_in=LEGEND_WIDTH_IN)
-    fig.tight_layout(rect=rect)
-    fig.savefig(output_path, dpi=180)
-    plt.close(fig)
-    print(f"  y+ plot     -> {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -565,20 +401,13 @@ def main():
                   f"(max |err| = {record['log_max']:.4f})")
 
     if not records:
-        print("[warn] no records to plot")
+        print("[warn] no records")
         sys.exit(1)
 
-    # Output directory (always the same one the rest of the pipeline writes to).
-    out_dir = os.path.join(results_root, "validation")
+    out_dir = os.path.join(results_root, pp.SUMMARY_DIR, "tables")
     os.makedirs(out_dir, exist_ok=True)
-
-    global STUDY_MANIFEST
-    STUDY_MANIFEST = pp.load_manifest(run_case_dir)
-    plot_cf_combined(records, reference,
-                     os.path.join(out_dir, "cf_validation.png"))
-    plot_yplus_combined(records, os.path.join(out_dir, "yplus_validation.png"))
-    write_summary_csv(records, os.path.join(out_dir, "cf_validation.csv"))
-    summary_lines = write_summary_txt(records, os.path.join(out_dir, "cf_validation.txt"))
+    write_summary_csv(records, os.path.join(out_dir, "wall_metrics.csv"))
+    summary_lines = write_summary_txt(records, os.path.join(out_dir, "wall_metrics.txt"))
     print("\n" + "\n".join(summary_lines))
     print("\nCf validation complete.")
 

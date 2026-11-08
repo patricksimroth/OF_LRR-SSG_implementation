@@ -98,6 +98,11 @@ def delta99_composite(x, re_per_m, pi=None):
     return np.interp(x * re_per_m, sol["re_x"], sol["re_d99"]) / re_per_m
 
 
+def cf_composite(x, re_per_m, pi=None):
+    sol = solve_plate(pi)
+    return np.interp(x * re_per_m, sol["re_x"], sol["cf"])
+
+
 def delta_power_law(x, re_per_m):
     """Prandtl 1/7 power law: the thickness where u = U_e EXACTLY."""
     return 0.37 * x / (re_per_m * x) ** 0.2

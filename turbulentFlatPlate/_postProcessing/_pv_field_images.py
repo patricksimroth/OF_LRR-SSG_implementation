@@ -4,16 +4,26 @@ _pv_field_images.py – field images with the mesh on top, one run, one pvbatch 
 Runs inside ParaView's pvbatch, not the project venv:
     pvbatch --force-offscreen-rendering _pv_field_images.py <case.foam> <label> <specs-json>
 Each spec: {"out", "field", "component" (None / "Magnitude" / "XX" ...), "title",
-"caption", "window" (None = whole domain, else [x0, x1, y0, y1]), "preset", "log"}.
+"caption", "window" (None = whole domain, else [x0, x1, y0, y1]), "preset", "log"},
+optionally "weights" ([[component index or None, weight], ...]: colour by
+sum(weight * field[:, index]) instead of field/component, VTK component order)
+and "symlog" ({"top": q1, "ref": q2, "decades": n}: colour by
+sign(v) log10(1 + |v|/v0), v0 = the area-weighted q2-quantile of |v| in the
+window but at least 10^-n of the upper limit, the area-weighted q1-quantile;
+symmetric about 0, values beyond it in the end colours, labels at +-powers of
+ten).
 Called per run by field_images.py; the leading underscore keeps the drivers
 from executing it directly.
 """
 import json
 import sys
 
-from paraview.simple import (Clip, ColorBy, CreateView, GetColorTransferFunction,
-                             GetScalarBar, Hide, HideScalarBarIfNotNeeded,
-                             OpenFOAMReader, SaveScreenshot, Show, Text)
+import numpy as np
+from paraview import servermanager
+from paraview.simple import (CellSize, Clip, ColorBy, CreateView, Delete, GetColorTransferFunction,
+                             GetScalarBar, Hide, HideScalarBarIfNotNeeded, MergeBlocks,
+                             OpenFOAMReader, PythonCalculator, SaveScreenshot, Show)
+from vtkmodules.numpy_interface import dataset_adapter as dsa
 
 IMAGE_SIZE = [2800, 1300]
 DOMAIN_WIDTH_FRACTION = 0.76   # rest of the width is kept free for the colour bar
@@ -42,12 +52,8 @@ for name, value in (("UseColorPaletteForBackground", 0),
 view.Background = [1.0, 1.0, 1.0]
 view.CameraParallelProjection = 1
 
-caption_source = Text()
-caption = Show(caption_source, view)
-caption.Color = [0.0, 0.0, 0.0]
-caption.WindowLocation = "Upper Left Corner"
-
 clips = {}
+temporary = []
 
 
 def source_for(window):
@@ -74,6 +80,75 @@ def source_for(window):
     return clips[key]
 
 
+def weighted_source(source, spec):
+    """Cell array `budgetTerm` = sum(weight * field[:, index]) on source."""
+    field = spec["field"]
+    parts = []
+    for index, weight in spec["weights"]:
+        column = f"inputs[0].CellData['{field}']"
+        if index is not None:
+            column += f"[:, {int(index)}]"
+        parts.append(f"({float(weight)!r})*{column}")
+    calc = PythonCalculator(Input=source)
+    calc.ArrayAssociation = "Cell Data"
+    calc.ArrayName = "budgetTerm"
+    calc.Expression = " + ".join(parts)
+    calc.UpdatePipeline(latest)
+    temporary.append(calc)
+    return calc
+
+
+def abs_quantiles(source, array, qs):
+    """Area-weighted quantiles of |array| over the cells of source."""
+    sizes = CellSize(Input=MergeBlocks(Input=source))
+    sizes.ComputeVertexCount = 0
+    sizes.ComputeLength = 0
+    sizes.ComputeArea = 0
+    sizes.ComputeVolume = 1
+    data = dsa.WrapDataObject(servermanager.Fetch(sizes))
+    value = np.abs(np.asarray(data.CellData[array]))
+    weight = np.abs(np.asarray(data.CellData["Volume"]))
+    merged = sizes.Input
+    Delete(sizes)
+    Delete(merged)
+    keep = np.isfinite(value)
+    value, weight = value[keep], weight[keep]
+    if not value.size:
+        return [0.0 for _ in qs]
+    order = np.argsort(value)
+    cumulative = np.cumsum(weight[order])
+    index = [min(int(np.searchsorted(cumulative, q * cumulative[-1])), value.size - 1)
+             for q in qs]
+    return [float(value[order][i]) for i in index]
+
+
+def symlog_source(source, array, v0):
+    """Cell array `<array>Log` = sign(v) log10(1 + |v|/v0)."""
+    calc = PythonCalculator(Input=source)
+    calc.ArrayAssociation = "Cell Data"
+    calc.ArrayName = array + "Log"
+    calc.Expression = (f"numpy.sign(inputs[0].CellData['{array}'])"
+                       f"*log10(1.0 + abs(inputs[0].CellData['{array}'])/{v0!r})")
+    calc.UpdatePipeline(latest)
+    temporary.append(calc)
+    return calc
+
+
+def symlog_labels(v0, top, n_max=3, gap=0.12):
+    """[(position, text)]: 0 and +-10^k up to top, at most n_max per side,
+    the largest always included, none within gap of the range from 0."""
+    level = np.log10(1.0 + top / v0)
+    k1 = int(np.floor(np.log10(top)))
+    exps = [k for k in range(k1, int(np.floor(np.log10(v0))) - 2, -1)
+            if np.log10(1.0 + 10.0 ** k / v0) >= gap * level]
+    step = max(1, int(np.ceil(len(exps) / n_max)))
+    labels = [(0.0, "0")]
+    for k in exps[::step]:
+        s = float(np.log10(1.0 + 10.0 ** k / v0))
+        labels += [(s, f"$10^{{{k}}}$"), (-s, f"$-10^{{{k}}}$")]
+    return sorted(labels)
+
+
 def fit_camera(x0, x1, y0, y1):
     """Parallel camera along -z; the region fills the left DOMAIN_WIDTH_FRACTION
     of the image, the colour bar sits on the right."""
@@ -90,31 +165,61 @@ def fit_camera(x0, x1, y0, y1):
     view.CameraParallelScale = scale
 
 
-previous = None
 for spec in specs:
-    if previous is not None:
-        prev_source, prev_lut = previous
-        Hide(prev_source, view)
-        HideScalarBarIfNotNeeded(prev_lut, view)
-
     source = source_for(spec["window"])
+    if spec.get("weights"):
+        source = weighted_source(source, spec)
+        array = "budgetTerm"
+    else:
+        array = spec["field"]
+    symlog = spec.get("symlog")
+    if symlog:
+        top, ref = abs_quantiles(source, array, (symlog["top"], symlog["ref"]))
+        top = top or 1.0
+        v0 = max(ref, top * 10.0 ** -symlog["decades"])
+        source = symlog_source(source, array, v0)
+        array += "Log"
+        level = float(np.log10(1.0 + top / v0))
     display = Show(source, view)
     display.SetRepresentationType("Surface With Edges")
     display.EdgeColor = [0.25, 0.25, 0.25]
     if spec["component"]:
-        ColorBy(display, ("CELLS", spec["field"], spec["component"]))
+        ColorBy(display, ("CELLS", array, spec["component"]))
     else:
-        ColorBy(display, ("CELLS", spec["field"]))
-    lut = GetColorTransferFunction(spec["field"])
+        ColorBy(display, ("CELLS", array))
+    lut = GetColorTransferFunction(array)
     lut.ApplyPreset(spec["preset"], True)
     lut.UseLogScale = 0
-    display.RescaleTransferFunctionToDataRange(False, True)
+    if symlog:
+        lut.AutomaticRescaleRangeMode = "Never"
+        lut.RescaleTransferFunction(-level, level)
+    else:
+        lut.AutomaticRescaleRangeMode = "Grow and update on 'Apply'"
+        display.RescaleTransferFunctionToDataRange(False, True)
     if spec["log"]:
         lo, hi = lut.RGBPoints[0], lut.RGBPoints[-4]
         if lo > 0.0 and hi > lo:
             lut.UseLogScale = 1
     display.SetScalarBarVisibility(view, True)
     bar = GetScalarBar(lut, view)
+    if symlog:
+        labels = symlog_labels(v0, top)
+        lut.Annotations = [x for s, text in labels for x in (repr(s), text)]
+        bar.DrawAnnotations = 1
+        bar.UseCustomLabels = 1
+        bar.CustomLabels = [s for s, _ in labels]
+        bar.DrawTickLabels = 0
+        bar.AddRangeLabels = 0
+        bar.TextPosition = "Ticks left/bottom, annotations right/top"
+        bar.ScalarBarLength = 0.70
+    else:
+        lut.Annotations = []
+        bar.DrawAnnotations = 0
+        bar.UseCustomLabels = 0
+        bar.DrawTickLabels = 1
+        bar.AddRangeLabels = 1
+        bar.TextPosition = "Ticks right/top, annotations left/bottom"
+        bar.ScalarBarLength = 0.74
     bar.Title = spec["title"]
     bar.ComponentTitle = ""
     bar.TitleColor = [0.0, 0.0, 0.0]
@@ -131,9 +236,7 @@ for spec in specs:
     bar.WindowLocation = "Any Location"
     bar.Orientation = "Vertical"
     bar.Position = [0.81, 0.08]
-    bar.ScalarBarLength = 0.74
 
-    caption_source.Text = f"{label}   {spec['caption']}, time {latest:g}"
     if spec["window"] is None:
         x0, x1, y0, y1, _, _ = reader.GetDataInformation().GetBounds()
     else:
@@ -142,4 +245,7 @@ for spec in specs:
 
     SaveScreenshot(spec["out"], view, ImageResolution=IMAGE_SIZE,
                    TransparentBackground=0)
-    previous = (source, lut)
+    Hide(source, view)
+    HideScalarBarIfNotNeeded(lut, view)
+    while temporary:
+        Delete(temporary.pop())

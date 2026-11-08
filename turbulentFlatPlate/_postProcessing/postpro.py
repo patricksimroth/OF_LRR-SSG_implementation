@@ -1,12 +1,19 @@
 """
 postpro.py – Post-processing for the turbulentFlatPlate case.
-Reads sampled wall-normal profiles at x = 1 m (from the sampleUyPlus
-function object) and computes u+ / y+ for comparison against the
-theoretical inner-law and log-law curves provided in _validation_data/
-and the Coles law (tmr_coles_upyp.dat).
+
+Per run, into results/<case>/<study>/<run>/convergence_plots/:
+    residuals.png            initial and final residuals per iteration
+    minmax_<field>.png       field minimum and maximum per iteration
+    Ux_profile_history.png   Ux(y) at x = 1 m at 20/40/60/80/100 % of the run
+
+Per study, into summary/wall_law/:
+    uplus_x1m.png            u+ over y+ at x = 1 m against the viscous sublayer,
+                             the log law (kappa 0.41, B 5.0) and Coles' profile;
+                             rows h+, columns approach, one line per core size,
+                             the same model's blockMesh run dashed (as
+                             profile_validation.py).  u_tau is each run's own.
 Can be called either from the source _postProcessing/ directory or from the
-run/turbulentFlatPlate/ directory (same path-resolution logic as the
-backwards-step case).
+run/turbulentFlatPlate/ directory.
 """
 import glob
 import io
@@ -28,6 +35,22 @@ import numpy as np
 import pandas as pd
 
 import _pp_common as pp
+import profile_validation as pv
+
+pp.report_style()
+
+# (label, unit) of the minMax fields; unknown ones keep their OpenFOAM name.
+FIELD_LABELS = {
+    "p": (r"$p$", "Pa"), "mag(U)": (r"$|U|$", "m/s"), "T": (r"$T$", "K"),
+    "e": (r"$e$", "J/kg"), "k": (r"$k$", "m$^2$/s$^2$"), "omega": (r"$\omega$", "1/s"),
+    "epsilon": (r"$\varepsilon$", "m$^2$/s$^3$"), "nut": (r"$\nu_t$", "m$^2$/s"),
+    "nuTilda": (r"$\tilde\nu$", "m$^2$/s"), "rho": (r"$\rho$", "kg/m$^3$"),
+}
+RESIDUAL_LABELS = {"Ux": r"$U_x$", "Uy": r"$U_y$", "Uz": r"$U_z$", "p": r"$p$", "e": r"$e$",
+                   "h": r"$h$", "k": r"$k$", "omega": r"$\omega$", "epsilon": r"$\varepsilon$",
+                   "nuTilda": r"$\tilde\nu$", "Rxx": r"$R_{xx}$", "Rxy": r"$R_{xy}$",
+                   "Rxz": r"$R_{xz}$", "Ryy": r"$R_{yy}$", "Ryz": r"$R_{yz}$", "Rzz": r"$R_{zz}$"}
+SINGLE_SIZE = (pp.REPORT_WIDTH_IN, 3.0)
 # ---------------------------------------------------------------------------
 # Convergence plots  (identical helpers to backwards_step_tut)
 # ---------------------------------------------------------------------------
@@ -56,17 +79,18 @@ def plot_minMax_data(file_path, output_path):
     os.makedirs(output_dir, exist_ok=True)
     for field, entries in field_data.items():
         df = pd.DataFrame(entries)
-        plt.figure(figsize=(10, 6))
-        plt.plot(df["Time"], df["Min"], label="Min Value")
-        plt.plot(df["Time"], df["Max"], label="Max Value")
-        plt.title(f"Field Variation Over Time: {field}")
-        plt.xlabel("Time")
-        plt.ylabel("Value")
-        plt.legend()
-        plt.grid(True, which="both", linestyle="--", alpha=0.5)
-        safe = "plot_" + field.replace("(", "_").replace(")", "_") + ".png"
-        plt.savefig(os.path.join(output_dir, safe))
-        plt.close()
+        symbol, unit = FIELD_LABELS.get(field, (field, None))
+        fig, ax = plt.subplots(figsize=SINGLE_SIZE)
+        ax.plot(df["Time"], df["Max"], color=pp.CORE_COLORS[1], label="maximum")
+        ax.plot(df["Time"], df["Min"], color=pp.CORE_COLORS[2], label="minimum")
+        ax.set_xlabel("iteration")
+        ax.set_ylabel(f"{symbol} [{unit}]" if unit else symbol)
+        rect = pp.legend_below(fig, ax.get_legend_handles_labels()[0])
+        fig.tight_layout(rect=rect)
+        safe = re.sub(r"[^A-Za-z0-9]+", "", field.replace("mag(", "mag"))
+        fig.savefig(os.path.join(output_dir, f"minmax_{safe}.png"))
+        plt.close(fig)
+
 
 def plot_residual_data(file_path, output_path):
     if not os.path.exists(file_path):
@@ -89,28 +113,28 @@ def plot_residual_data(file_path, output_path):
         sep=r"\s+", names=header_parts, engine="python",
     )
     field_prefixes = sorted({col[:-8] for col in df_full.columns if col.endswith("_initial")})
-    colors = itertools.cycle(plt.rcParams["axes.prop_cycle"].by_key()["color"])
-    plt.figure(figsize=(12, 7))
+    colors = itertools.cycle(pp.CORE_COLORS + ("#2a78d6", "#1baf7a", "#9a3fb5", pp.INK))
+    fig, ax = plt.subplots(figsize=SINGLE_SIZE)
+    handles = []
     for field in field_prefixes:
         init_col, final_col = f"{field}_initial", f"{field}_final"
         if init_col in df_full.columns and final_col in df_full.columns:
             color = next(colors)
-            plt.plot(df_full["Time"], df_full[init_col], label=f"{field} Initial",
-                     color=color, linestyle=":")
-            plt.plot(df_full["Time"], df_full[final_col], label=f"{field} Final",
-                     color=color, linestyle="-")
-    plt.yscale("log")
-    plt.title("Solver Residuals")
-    plt.xlabel("Iteration")
-    plt.ylabel("Residual")
-    plt.grid(True, which="both", ls="-", alpha=0.2)
-    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-    plt.tight_layout()
+            ax.plot(df_full["Time"], df_full[init_col], color=color, linewidth=1.0)
+            ax.plot(df_full["Time"], df_full[final_col], color=color, linewidth=0.6,
+                    linestyle=":")
+            handles.append(pp.line_handle(RESIDUAL_LABELS.get(field, field), color))
+    handles += [pp.line_handle("initial", pp.MUTED, "-"), pp.line_handle("final", pp.MUTED, ":")]
+    ax.set_yscale("log")
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("residual")
+    rect = pp.legend_below(fig, handles, ncol=min(len(handles), 8))
+    fig.tight_layout(rect=rect)
     output_dir = os.path.join(output_path, "convergence_plots")
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, "plot_residuals.png"))
-    plt.close()
-    print(f"  Residual plot → {output_dir}/plot_residuals.png")
+    fig.savefig(os.path.join(output_dir, "residuals.png"))
+    plt.close(fig)
+    print(f"  Residual plot → {output_dir}/residuals.png")
 # ---------------------------------------------------------------------------
 # Validation data parser
 # ---------------------------------------------------------------------------
@@ -147,9 +171,6 @@ def parse_theory_data(validation_file):
 # layout differs per model and must come from the file name.
 # The field -> column mapping and the filename parser live in _pp_common,
 # shared with profile_validation.py.
-# Extra figure width reserved for the right-hand legend, in inches.
-LEGEND_WIDTH_IN = 3.0
-
 _PROFILE_FIELD_COLUMNS = pp.PROFILE_FIELD_COLUMNS
 _profile_columns_from_filename = pp.profile_columns_from_filename
 
@@ -247,120 +268,79 @@ def compute_uplus_yplus(df, nu, rho=None):
 # Plotting
 # ---------------------------------------------------------------------------
 def plot_uplus_yplus(theory, models_data, output_dir, coles=None, manifest=None):
-    """
-    Plot u+ vs y+ (on log scale) for all models against the theoretical curves.
-    Parameters
-    ----------
-    theory      : dict from parse_theory_data()
-    models_data : {model_name: DataFrame with u_plus, y_plus columns}
-    output_dir  : directory where the PNG is saved
-    coles       : optional (N, 2) array (y+, u+) from tmr_coles_upyp.dat
-    """
+    """u+ over y+ at x = 1 m: rows h+, columns approach, one line per core size
+    and the same model's blockMesh run dashed (profile_validation.layout).
+    Without a manifest every run is a line in one panel."""
     os.makedirs(output_dir, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10 + LEGEND_WIDTH_IN, 7))
-    # Theory curves (convert from log10(y+) to y+)
-    u_plus_th = theory["u_plus"]
-    ax.plot(10**theory["log_y_inner"], u_plus_th,
-            color="green", linewidth=1.2, linestyle="-", label="viscous sublayer (u⁺ = y⁺)")
-    ax.plot(10**theory["log_y_log"],   u_plus_th,
-            color="green", linewidth=1.2, linestyle="--", label="log law (κ=0.41, B=5.0)")
+    index = pp.combo_index(manifest)
+    groups = pv.layout(sorted(models_data), index)
+    refs = [(10 ** theory["log_y_inner"], theory["u_plus"], "-", r"$u^+ = y^+$"),
+            (10 ** theory["log_y_log"], theory["u_plus"], "--", "log law")]
     if coles is not None:
-        ax.plot(coles[:, 0], coles[:, 1],
-                color="tab:purple", linewidth=1.5,
-                label="Coles, Re_θ = 10 000 (Bardina et al., NASA TM-110446)")
-    # Colour = mesh approach, marker = swept parameter (study manifest).
-    colors, markers, sections = pp.study_styles(list(models_data), manifest)
-    for model_name, df in sorted(models_data.items()):
-        valid = df[df["y_plus"] > 0].copy()
-        ax.plot(valid["y_plus"], valid["u_plus"],
-                color=colors.get(model_name, "k"),
-                marker=markers.get(model_name, None), markersize=4,
-                markevery=max(1, len(valid) // 15), linewidth=1.8)
-    ax.set_xscale("log")
-    ax.set_xlabel("y+", fontsize=13)
-    ax.set_ylabel("u+", fontsize=13)
-    ax.set_title("Law of the Wall – u+ vs y+ (log scale)  [x = 1 m]", fontsize=14)
-    ax.grid(True, linestyle="--", alpha=0.5, which="both")
-    ax.set_xlim(0.1, 1e5)
-    ax.set_ylim(0, 30)
-    refs = [("Reference", [("viscous sublayer (u+ = y+)", "green", None),
-                           ("log law (k=0.41, B=5.0)", "green", None)]
-             + ([("Coles, Re_theta = 10 000", "tab:purple", None)]
-                if coles is not None else []))]
-    rect = pp.legend_right(fig, sections + refs, width_in=LEGEND_WIDTH_IN)
-    fig.tight_layout(rect=rect)
-    out_path = os.path.join(output_dir, "plot_uplus_yplus.png")
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-    print(f"  u+/y+ plot → {out_path}")
-    return out_path
+        refs.append((coles[:, 0], coles[:, 1], "-.", "Coles"))
+    written = []
+    for group in groups:
+        rows, cols, cells = group["rows"], group["cols"], group["cells"]
+        style = {lab: (pp.CORE_COLORS[i % len(pp.CORE_COLORS)],
+                       pp.CORE_MARKERS[i % len(pp.CORE_MARKERS)])
+                 for i, lab in enumerate(group["order"])}
+        reference = group["reference"]
+        fig, axes = pp.grid_figure(len(rows), len(cols), row_height=1.9,
+                                   sharex=True, sharey=True)
+        plotted = set()
+        for i, row in enumerate(rows):
+            for j, approach in enumerate(cols):
+                ax = axes[i][j]
+                for x, u, ls, _ in refs:
+                    ax.plot(x, u, color=pp.EDGE, linestyle=ls, linewidth=0.8)
+                names = sorted(cells.get((row, approach), []),
+                               key=lambda n: group["order"].index(group["label"][n]))
+                for slot, name in enumerate(names):
+                    df = models_data[name]
+                    valid = df[df["y_plus"] > 0]
+                    lab = group["label"][name]
+                    color, marker = style[lab]
+                    ax.plot(valid["y_plus"], valid["u_plus"], color=color, marker=marker,
+                            markersize=3.5, markeredgecolor="white", markeredgewidth=0.4,
+                            linewidth=1.0, markevery=max(1, len(valid) // 6))
+                    plotted.add(lab)
+                if reference:
+                    df = models_data[reference]
+                    valid = df[df["y_plus"] > 0]
+                    ax.plot(valid["y_plus"], valid["u_plus"], **pp.BASELINE_STYLE)
+                h = next(((index.get(n, {}).get("mesh") or {}).get("totalLayerThickness")
+                          for n in names), None)
+                if h and reference:
+                    df = models_data[reference]
+                    ax.axvline(h * df.attrs["u_tau"] / df.attrs["nu"], **pp.STACK_TOP_STYLE)
+                ax.set_xscale("log")
+                ax.set_xlim(0.1, 1e5)
+                ax.set_ylim(0, 30)
+        pp.label_grid(axes, [pp.fmt_hplus(r) if r is not None else "" for r in rows],
+                      cols, r"$u^+$", r"$y^+$")
+        handles = [pp.line_handle(lab, style[lab][0], "-", style[lab][1])
+                   for lab in group["order"] if lab in plotted]
+        if reference:
+            handles.append(pp.line_handle(pp.ERROR_BASELINE, pp.INK, "--"))
+            handles.append(pp.line_handle(pp.STACK_TOP_LABEL, pp.MUTED, ":"))
+        handles += [pp.line_handle(label, pp.EDGE, ls) for _, _, ls, label in refs]
+        rect = pp.legend_below(fig, handles)
+        fig.tight_layout(rect=rect, h_pad=0.6, w_pad=0.4)
+        suffix = f"_{group['model']}" if len(groups) > 1 else ""
+        out_path = os.path.join(output_dir, f"uplus_x1m{suffix}.png")
+        fig.savefig(out_path)
+        plt.close(fig)
+        print(f"  u+/y+ plot → {out_path}")
+        written.append(out_path)
+    return written
 
-def plot_Ux_vs_y(models_data, output_dir):
-    """
-    Plot Ux vs y (linear scale) for all models.
-    Parameters
-    ----------
-    models_data : {model_name: DataFrame with Ux, y columns}
-    output_dir  : directory where the PNG is saved
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 7))
-
-    # Both axes linear; y-axis focused on the boundary layer
-    ax.set_xscale("linear")
-    ax.set_yscale("linear")
-
-    # Data-driven limits: full U range and the 99 %-U boundary-layer edge
-    u_max = max(df["Ux"].max() for df in models_data.values())
-    y_edges = []
-    for df in models_data.values():
-        d = df.sort_values("y")
-        above = d[d["Ux"] >= 0.99 * d["Ux"].max()]
-        if not above.empty:
-            y_edges.append(float(above["y"].min()))
-    y_max = 1.05 * max(y_edges) if y_edges else max(df["y"].max() for df in models_data.values())
-
-    # Simulation profiles
-    prop_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    sim_colors = [c for c in prop_cycle if c.lower() not in ("#00ff00", "#008000")]
-    csv_frames = []
-    for idx, (model_name, df) in enumerate(sorted(models_data.items())):
-        color = sim_colors[idx % len(sim_colors)]
-        ax.plot(df["Ux"], df["y"],
-                color=color, linewidth=1.8, label=f"{model_name}")
-        # also export the plotted data to CSV for reuse
-        csv_frames.append(pd.DataFrame({
-            "model": model_name,
-            "y": df["y"].values,
-            "Ux": df["Ux"].values,
-        }))
-
-    ax.set_xlabel("Ux (m/s)", fontsize=13)
-    ax.set_ylabel("y (m)", fontsize=13)
-    ax.set_title("Velocity Profile – Ux vs y  [x = 1 m]", fontsize=14)
-    ax.legend(fontsize=11)
-    ax.grid(True, linestyle="--", alpha=0.5, which="both")
-    ax.set_xlim(0, 1.05 * u_max)
-    ax.set_ylim(0, y_max)
-    fig.tight_layout()
-    out_path = os.path.join(output_dir, "plot_Ux_vs_y.png")
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-
-    if csv_frames:
-        csv_path = os.path.join(output_dir, "Ux_vs_y_profiles.csv")
-        pd.concat(csv_frames, ignore_index=True).to_csv(csv_path, index=False)
-        print(f"  Ux vs y CSV  → {csv_path}")
-
-    print(f"  Ux vs y plot → {out_path}")
-    return out_path
 
 def plot_velocity_convergence(model_name, case_folder, output_path):
     """
     Per-model convergence figure: one Ux-vs-y profile for each of the
     20/40/60/80/100 % checkpoints of the run (closest available
     sampleUyPlusConv snapshot), light -> dark in time order.
-    Saved to <output_path>/convergence_plots/plot_velocity_convergence.png.
+    Saved to <output_path>/convergence_plots/Ux_profile_history.png.
     """
     conv_base = os.path.join(case_folder, "postProcessing", "sampleUyPlusConv")
     if not os.path.isdir(conv_base):
@@ -408,27 +388,24 @@ def plot_velocity_convergence(model_name, case_folder, output_path):
             y_edges.append(float(above["y"].min()))
     y_max = 1.05 * max(y_edges) if y_edges else max(df["y"].max() for _, df, _ in profiles)
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=SINGLE_SIZE)
     cmap = plt.get_cmap("Blues")
     n = len(profiles)
     for i, (t, df, label) in enumerate(profiles):
         frac = 0.35 + 0.65 * (i / max(n - 1, 1))
-        ax.plot(df["Ux"], df["y"],
-                color=cmap(frac), linewidth=1.8 if i == n - 1 else 1.3,
-                label=label)
-    ax.set_xlabel("Ux (m/s)", fontsize=13)
-    ax.set_ylabel("y (m)", fontsize=13)
-    ax.set_title(f"Velocity Profile Convergence – Ux vs y  [x = 1 m, {model_name}]", fontsize=14)
-    ax.legend(fontsize=11)
-    ax.grid(True, linestyle="--", alpha=0.5, which="both")
+        ax.plot(df["Ux"], 1e3 * df["y"], color=cmap(frac),
+                linewidth=1.3 if i == n - 1 else 1.0, label=f"iteration {t:g}")
+    ax.set_xlabel(r"$U_x$ [m/s]")
+    ax.set_ylabel(r"$y$ [mm]")
     ax.set_xlim(0, 1.05 * u_max)
-    ax.set_ylim(0, y_max)
-    fig.tight_layout()
+    ax.set_ylim(0, 1e3 * y_max)
+    rect = pp.legend_below(fig, ax.get_legend_handles_labels()[0])
+    fig.tight_layout(rect=rect)
 
     conv_dir = os.path.join(output_path, "convergence_plots")
     os.makedirs(conv_dir, exist_ok=True)
-    out_path = os.path.join(conv_dir, "plot_velocity_convergence.png")
-    fig.savefig(out_path, dpi=150)
+    out_path = os.path.join(conv_dir, "Ux_profile_history.png")
+    fig.savefig(out_path)
     plt.close(fig)
     print(f"  Velocity convergence plot → {out_path}")
     return out_path
@@ -480,15 +457,30 @@ if __name__ == "__main__":
         case_folder  = os.path.join(run_case_dir, model_name)
         output_path  = os.path.join(results_root, model_name)
         os.makedirs(output_path, exist_ok=True)
-        # --- Convergence plots ---
+        # --- Convergence plots (reused while the run and the plotting code are unchanged) ---
         min_max_path = os.path.join(case_folder, "postProcessing/minMax/0/fieldMinMax.dat")
-        if os.path.exists(min_max_path):
-            print("  Plotting minMax convergence…")
-            plot_minMax_data(min_max_path, output_path)
         solver_path = os.path.join(case_folder, "postProcessing/solverInfo/0/solverInfo.dat")
-        if os.path.exists(solver_path):
-            print("  Plotting residuals…")
-            plot_residual_data(solver_path, output_path)
+        conv_base = os.path.join(case_folder, "postProcessing", "sampleUyPlusConv")
+        conv_dir = os.path.join(output_path, "convergence_plots")
+        conv_stamp = os.path.join(conv_dir, ".stamp")
+        conv_key = pp.source_key(plot_minMax_data, plot_residual_data,
+                                 plot_velocity_convergence, parse_sample_profile)
+        conv_fresh = pp.outputs_fresh(
+            conv_stamp, glob.glob(os.path.join(conv_dir, "*.png")),
+            [p for p in (min_max_path, solver_path, conv_base) if os.path.exists(p)], conv_key)
+        if conv_fresh:
+            print("  Convergence plots unchanged, reused")
+        else:
+            if os.path.exists(conv_stamp):
+                os.remove(conv_stamp)
+            for stale in glob.glob(os.path.join(conv_dir, "*.png")):
+                os.remove(stale)
+            if os.path.exists(min_max_path):
+                print("  Plotting minMax convergence…")
+                plot_minMax_data(min_max_path, output_path)
+            if os.path.exists(solver_path):
+                print("  Plotting residuals…")
+                plot_residual_data(solver_path, output_path)
         # --- u+/y+ profile ---
         sample_base = os.path.join(case_folder, "postProcessing", "sampleUyPlus")
         sample_dir  = pp.latest_time_directory(sample_base)
@@ -501,21 +493,21 @@ if __name__ == "__main__":
         u_inf, nu, rho = pp.detect_case_parameters(case_folder)
         print(f"  detected U_inf = {u_inf:g} m/s, nu = {nu:g} m²/s, rho = {rho:.6f} kg/m³")
         df_prof, u_tau = compute_uplus_yplus(df_raw, nu, rho)
+        df_prof.attrs.update(u_tau=u_tau, nu=nu)
         models_uplus[model_name] = df_prof
 
         # --- Per-model velocity convergence plot (sampleUyPlusConv snapshots) ---
-        plot_velocity_convergence(model_name, case_folder, output_path)
+        if not conv_fresh:
+            plot_velocity_convergence(model_name, case_folder, output_path)
+            if os.path.isdir(conv_dir):
+                pp.write_stamp(conv_stamp, conv_key)
 
-    # --- Combined u+/y+ validation plot ---
+    # --- u+/y+ per approach and h+ ---
     if theory and models_uplus:
-        val_dir = os.path.join(results_root, "validation")
-        print(f"\nGenerating u+/y+ validation plot in {val_dir} …")
-        plot_uplus_yplus(theory, models_uplus, val_dir, coles=coles,
+        out_dir = os.path.join(results_root, pp.SUMMARY_DIR, "wall_law")
+        print(f"\nGenerating u+/y+ plot in {out_dir} …")
+        plot_uplus_yplus(theory, models_uplus, out_dir, coles=coles,
                          manifest=pp.load_manifest(run_case_dir))
-
-        # --- Ux vs y profile plot ---
-        print(f"Generating Ux vs y profile plot in {val_dir} …")
-        plot_Ux_vs_y(models_uplus, val_dir)
     else:
         if not theory:
             print("[warn] skipping u+/y+ plot – no theory data")

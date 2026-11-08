@@ -97,9 +97,15 @@ def load_manifest(run_case_dir):
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text())
+        manifest = json.loads(path.read_text())
     except json.JSONDecodeError:
         return None
+    # Each combo carries its run dir, so the analytical scales (case_scales)
+    # can be derived from the combo alone, wherever it is labelled.
+    for combo in manifest.get("combos", []):
+        if combo.get("run_dir"):
+            combo.setdefault("_case_dir", str(Path(run_case_dir) / combo["run_dir"]))
+    return manifest
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +293,13 @@ def detect_case_parameters(case_dir, fallback_u_inf=69.4, fallback_nu=1.388e-05)
     case_dir = Path(case_dir)
 
     u_inf = fallback_u_inf
-    u_path = case_dir / "0" / "U"
+    u_path = case_dir / "0.orig" / "U"
     if not u_path.is_file():
-        u_path = case_dir / "0.orig" / "U"
+        u_path = case_dir / "0" / "U"
     if u_path.is_file():
         match = re.search(
             r"internalField\s+uniform\s*\(\s*([-\d.eE+]+)\s+[-\d.eE+]+\s+[-\d.eE+]+\s*\)",
-            u_path.read_text(),
+            u_path.read_text(errors="ignore"),
         )
         if match:
             u_inf = float(match.group(1))
@@ -395,6 +401,123 @@ def run_completed(case_dir):
         return False
 
 
+# ---------------------------------------------------------------------------
+# Reuse of per-run outputs, parallel execution
+# ---------------------------------------------------------------------------
+# A redraw usually changes labels, not data, so the expensive per-run outputs
+# (pvbatch extractions and renders, per-run convergence plots) are reused when
+# nothing they depend on changed.  A stamp file next to them holds a key (the
+# extraction arguments or the plotting code) and its mtime records when they
+# were made: they are reused only if the key matches and the stamp is newer
+# than every input.  Outputs from before stamps existed are reused once when
+# they are all newer than the inputs, and stamped then.
+PV_JOBS_ENV = "PP_PV_JOBS"
+JOBS_ENV = "PP_JOBS"
+
+
+def newest_mtime(paths):
+    """Newest mtime over the given files and directory trees (0 if none exist)."""
+    newest = 0.0
+    for path in paths:
+        path = Path(path)
+        if path.is_dir():
+            for root, _dirs, files in os.walk(path):
+                newest = max([newest, os.stat(root).st_mtime]
+                             + [os.stat(os.path.join(root, f)).st_mtime for f in files])
+        elif path.exists():
+            newest = max(newest, path.stat().st_mtime)
+    return newest
+
+
+def run_data_inputs(run_dir, latest):
+    """What a run's derived outputs depend on: its latest time and its mesh."""
+    return [Path(latest), Path(run_dir) / "constant" / "polyMesh"]
+
+
+def outputs_fresh(stamp, outputs, inputs, key=""):
+    """True when `outputs` can be reused (see above); stamps legacy outputs."""
+    stamp = Path(stamp)
+    outputs = [Path(o) for o in outputs]
+    try:
+        if not outputs or not all(o.is_file() and o.stat().st_size > 0 for o in outputs):
+            return False
+        newest_input = newest_mtime(inputs)
+        if stamp.is_file():
+            return stamp.read_text() == key and stamp.stat().st_mtime > newest_input
+        if min(o.stat().st_mtime for o in outputs) > newest_input:
+            write_stamp(stamp, key)
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def write_stamp(stamp, key=""):
+    Path(stamp).write_text(key)
+
+
+def source_key(*functions):
+    """Key that changes whenever the source of any of the functions changes."""
+    import hashlib
+    import inspect
+    text = "".join(inspect.getsource(f) for f in functions)
+    return hashlib.sha1(text.encode()).hexdigest()
+
+
+def _env_jobs(name, default):
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+def pv_jobs():
+    """Concurrent pvbatch processes ($PP_PV_JOBS, default 3).  Each one holds a
+    whole mesh in memory: on this 7 GB machine keep the total over all
+    concurrent run_postpro.sh calls at about 3."""
+    return _env_jobs(PV_JOBS_ENV, 3)
+
+
+def plot_jobs():
+    """Worker processes for figure-heavy scripts ($PP_JOBS, default min(6, cores))."""
+    return _env_jobs(JOBS_ENV, min(6, os.cpu_count() or 1))
+
+
+def map_threads(fn, items, jobs):
+    """[fn(item)] with up to `jobs` threads, in order; for subprocess-bound work."""
+    items = list(items)
+    if jobs <= 1 or len(items) <= 1:
+        return [fn(item) for item in items]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        return list(pool.map(fn, items))
+
+
+_FORK_JOB = {}
+
+
+def _fork_call(i):
+    fn, items = _FORK_JOB["job"]
+    return fn(items[i])
+
+
+def map_processes(fn, items, jobs):
+    """[fn(item)] in up to `jobs` forked processes, in order.  fn and items reach
+    the workers through fork, so they need not be picklable; results must be."""
+    items = list(items)
+    if jobs <= 1 or len(items) <= 1:
+        return [fn(item) for item in items]
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+    _FORK_JOB["job"] = (fn, items)
+    try:
+        with ProcessPoolExecutor(max_workers=jobs,
+                                 mp_context=multiprocessing.get_context("fork")) as pool:
+            return list(pool.map(_fork_call, range(len(items))))
+    finally:
+        _FORK_JOB.clear()
+
+
 def split_completed(run_case_dir, names):
     """Split run-dir names into (completed, failed) by run_completed()."""
     run_case_dir = Path(run_case_dir)
@@ -438,20 +561,10 @@ def solved_run_dirs(run_case_dir):
 
 
 # ---------------------------------------------------------------------------
-# Plot styling for study combos
+# Study manifest access
 # ---------------------------------------------------------------------------
-# A study is <model>__<approach>[_<param><value>]... , so a 4-approach x
-# 5-layer sweep is 20 runs.  Giving each its own colour is unreadable, so
-# colour encodes the MESH APPROACH and the marker encodes the swept PARAMETER
-# value: 4 + 5 = 9 legend entries instead of 20.  Both come from the study
-# manifest, never from parsing run-dir names (combo_tag mangles values -
-# 1.0e-06 becomes "1em06"), so this stays correct whatever is swept.
-STYLE_COLORS = ("tab:blue", "tab:orange", "tab:green", "tab:red",
-                "tab:purple", "tab:brown", "tab:pink", "tab:olive",
-                "tab:gray", "tab:cyan")
-STYLE_MARKERS = ("o", "^", "s", "D", "v", "P", "X", "*", "<", ">")
-
-
+# Sweep values come from the study manifest, never from parsing run-dir names
+# (combo_tag mangles values - 1.0e-06 becomes "1em06").
 def combo_index(manifest):
     """run_dir -> combo dict from a study manifest ({} without one)."""
     if not manifest:
@@ -478,90 +591,320 @@ def swept_keys(combos):
     return sorted(keys)
 
 
-def _variant_label(params, keys):
-    """'nPrisms=45' style label for the swept keys of one combo."""
-    parts = [f"{k}={params[k]:g}" if isinstance(params.get(k), float)
-             else f"{k}={params[k]}" for k in keys if k in params]
+# ---------------------------------------------------------------------------
+# Non-dimensional case description
+# ---------------------------------------------------------------------------
+# Every figure describes a mesh by two numbers instead of its raw parameters:
+#   h+              = h u_tau / nu         prism-stack height in wall units
+#                                          (replaces nPrisms)
+#   L_nom/delta_m   = L_nom / delta_mean   NOMINAL streamwise wall core cell size
+#                                          (replaces wallLevel, wallCellSize, ...)
+# and figures that put every stack on one axis by
+#   L* = (L_core/delta_mean) * phi,  phi = <(delta - h)+> / delta_mean
+# (L_core: core cell size measured next to the stack, _core_size.py;
+# phi: outgrown fraction of the mean boundary layer, 0 if it never leaves the stack).
+# Along the plate x/delta_mean.  u_tau and delta_mean are ANALYTICAL (_bl_theory
+# composite profile + momentum integral): u_tau at NORM_STATION, delta_mean =
+# delta99 averaged over 0 <= x <= NORM_STATION, so the normalisation is one
+# constant per flow condition, identical for every run, approach, model and study.
+NORM_STATION = 2.0
+STACK_KEYS = ("nPrisms", "expansionRatio", "firstLayerThickness", "totalLayerThickness")
+CORE_KEYS = ("wallCellSize", "wallLevel", "refineDistance", "backgroundCellSize")
+HPLUS_SYMBOL = r"$h^+$"
+DX_SYMBOL = r"$L_\mathrm{nom}/\bar\delta$"
+LSTAR_SYMBOL = r"$L^*$"
+DELTA_L_SYMBOL = r"$\delta_L$"
+DELTA_MEAN_SYMBOL = r"$\bar\delta$"
+
+
+def flow_scales(u_inf, nu, station=NORM_STATION):
+    """Analytical normalisation of one flow condition (see NORM_STATION)."""
+    import _bl_theory as theory
+
+    key = (round(float(u_inf), 9), float(f"{nu:.9g}"), float(station))
+    if key not in _FLOW_SCALES:
+        re_per_m = u_inf / nu
+        cf = float(theory.cf_composite(station, re_per_m))
+        x, delta = delta_curve({"u_inf": u_inf, "nu": nu, "station": station})
+        _FLOW_SCALES[key] = {
+            "u_inf": float(u_inf), "nu": float(nu), "station": float(station),
+            "delta_L": float(theory.delta99_composite(station, re_per_m)),
+            "delta_mean": float(np.trapezoid(delta, x) / station),
+            "cf": cf, "u_tau": float(u_inf * math.sqrt(cf / 2.0)),
+        }
+    return _FLOW_SCALES[key]
+
+
+def delta_curve(scales, n=4001):
+    """Analytical delta99 over the plate 0 <= x <= station: (x, delta)."""
+    import _bl_theory as theory
+
+    x = np.linspace(0.0, scales["station"], n)
+    return x, theory.delta99_composite(x, scales["u_inf"] / scales["nu"])
+
+
+def outgrown_fraction(h, scales):
+    """phi = <(delta - h)+> / delta_mean: plate-averaged analytical boundary-layer
+    thickness above the stack top h, relative to the mean thickness."""
+    x, delta = delta_curve(scales)
+    return float(np.trapezoid(np.maximum(delta - h, 0.0), x) / scales["station"]
+                 / scales["delta_mean"])
+
+
+_FLOW_SCALES = {}
+_CASE_SCALES = {}
+# Scales of the combos labelled last, for the legend note of that figure.
+_ACTIVE_SCALES = {}
+
+
+def case_scales(case_dir=None):
+    """flow_scales() of a run case dir; the TMR defaults without one."""
+    key = str(case_dir) if case_dir else None
+    if key not in _CASE_SCALES:
+        if case_dir and Path(case_dir).is_dir():
+            u_inf, nu, _rho = detect_case_parameters(case_dir)
+        else:
+            u_inf, nu, _rho = detect_case_parameters(Path("/nonexistent"))
+        _CASE_SCALES[key] = flow_scales(u_inf, nu)
+    return _CASE_SCALES[key]
+
+
+def combo_scales(combo):
+    scales = case_scales((combo or {}).get("_case_dir"))
+    _ACTIVE_SCALES["scales"] = scales
+    return scales
+
+
+def norm_note(scales=None, sep="\n"):
+    """Definition of h+ and L_nom/delta_mean; lines joined by sep."""
+    scales = scales or _ACTIVE_SCALES.get("scales") or case_scales()
+    return sep.join([
+        rf"{HPLUS_SYMBOL} = $h\,u_\tau/\nu$ (h: prism-stack height)",
+        rf"{DX_SYMBOL}: wall core cell size",
+        f"analytical, composite BL at x = {scales['station']:g} m",
+        rf"$u_\tau$ = {scales['u_tau']:.3f} m/s",
+        rf"{DELTA_MEAN_SYMBOL} = mean $\delta_{{99}}$ over the plate = "
+        f"{1e3 * scales['delta_mean']:.2f} mm",
+    ])
+
+
+def stack_height(combo):
+    """Prism-stack height [m] of a combo, or None (blockMesh: no stack)."""
+    combo = combo or {}
+    mesh = combo.get("mesh") or {}
+    params = combo.get("params") or {}
+    if mesh.get("totalLayerThickness"):
+        return float(mesh["totalLayerThickness"])
+    if params.get("totalLayerThickness"):
+        return float(params["totalLayerThickness"])
+    try:
+        n, first, ratio = params["nPrisms"], params["firstLayerThickness"], params["expansionRatio"]
+    except KeyError:
+        return None
+    return first * n if ratio == 1 else first * (ratio ** n - 1) / (ratio - 1)
+
+
+def h_plus(combo, scales=None):
+    h = stack_height(combo)
+    if h is None:
+        return None
+    scales = scales or combo_scales(combo)
+    return h * scales["u_tau"] / scales["nu"]
+
+
+def dx_norm(combo, scales=None):
+    dx = wall_cell_size(combo or {})
+    if dx is None:
+        return None
+    return dx / (scales or combo_scales(combo))["delta_mean"]
+
+
+def fmt_hplus(value):
+    return f"{HPLUS_SYMBOL} = {value:.0f}"
+
+
+def fmt_dx(value):
+    return f"{DX_SYMBOL} = {value:.2g}"
+
+
+def fmt_lstar(value):
+    return f"{LSTAR_SYMBOL} = {value:.2g}"
+
+
+def variant_label(combo, keys, scales=None):
+    """Label of one combo for its swept keys: stack parameters collapse to h+,
+    core-size parameters to L_nom/delta_mean, anything else stays 'key=value'."""
+    params = (combo or {}).get("params") or {}
+    parts = []
+    if any(k in STACK_KEYS and k in params for k in keys):
+        value = h_plus(combo, scales)
+        if value is not None:
+            parts.append(fmt_hplus(value))
+    if any(k in CORE_KEYS and k in params for k in keys):
+        value = dx_norm(combo, scales)
+        if value is not None:
+            parts.append(fmt_dx(value))
+    for k in keys:
+        if k in params and k not in STACK_KEYS and k not in CORE_KEYS:
+            parts.append(f"{k}={params[k]:g}" if isinstance(params[k], float)
+                         else f"{k}={params[k]}")
     return ", ".join(parts)
 
 
-def study_styles(run_names, manifest):
-    """(colors, markers, legend_sections) for a set of run dirs.
+def _label_order(label):
+    """Numeric order of variant labels ("h+ = 24" < "h+ = 590")."""
+    plain = re.sub(r"\$[^$]*\$", "", label)
+    return ([float(t) for t in re.findall(r"\d+(?:\.\d+)?(?:e-?\d+)?", plain)], label)
 
-    colour -> mesh approach, marker -> swept parameter value.  Without a
-    usable manifest every run simply gets its own colour and marker, and the
-    legend collapses to a single section.  legend_sections is
-    [(title, [(label, colour, marker), ...]), ...] for legend_right().
+
+# Mesh approach every other approach is compared against (structured,
+# prism-free, finest wall-normal grid).
+ERROR_BASELINE = "blockMesh"
+
+
+def wall_cell_size(combo):
+    """Nominal streamwise wall core cell size [m] of a study combo, or None.
+
+    snappy: backgroundCellSize / 2**wallLevel.  snappy45: the snapped wall
+    faces of a tilted square are h*sqrt(2) long, and its backgroundCellSize
+    default is only recorded in the manifest's mesh block.  gmsh:
+    wallCellSize.  blockMesh grades, so it has none.
     """
-    names = sorted(run_names)
-    index = combo_index(manifest)
-    if not names or not all(n in index for n in names):
-        colors = {n: STYLE_COLORS[i % len(STYLE_COLORS)] for i, n in enumerate(names)}
-        markers = {n: STYLE_MARKERS[i % len(STYLE_MARKERS)] for i, n in enumerate(names)}
-        return colors, markers, [(None, [(n, colors[n], markers[n]) for n in names])]
-
-    keys = swept_keys([index[n] for n in names])
-    multi_model = len({index[n].get("model") for n in names}) > 1
-
-    def colour_key(name):
-        approach = index[name].get("approach") or "?"
-        return f"{index[name].get('model')}, {approach}" if multi_model else approach
-
-    approaches, variants = [], []
-    for name in names:
-        approach = colour_key(name)
-        variant = _variant_label(index[name].get("params") or {}, keys)
-        if approach not in approaches:
-            approaches.append(approach)
-        if variant not in variants:
-            variants.append(variant)
-    approaches.sort()
-    # Numeric order where the labels are numeric ("nPrisms=45" < "nPrisms=120");
-    # plain alphabetical would put 120 before 45.
-    variants.sort(key=lambda v: ([float(t) for t in re.findall(r"[\d.]+", v)], v))
-
-    color_of = {a: STYLE_COLORS[i % len(STYLE_COLORS)] for i, a in enumerate(approaches)}
-    marker_of = {v: STYLE_MARKERS[i % len(STYLE_MARKERS)] for i, v in enumerate(variants)}
-    colors, markers = {}, {}
-    for name in names:
-        colors[name] = color_of[colour_key(name)]
-        markers[name] = marker_of[_variant_label(index[name].get("params") or {}, keys)]
-
-    sections = [("Model, mesh" if multi_model else "Mesh",
-                 [(a, color_of[a], None) for a in approaches])]
-    if len(variants) > 1 or (variants and variants[0]):
-        sections.append((", ".join(keys) or "variant",
-                         [(v or "(none)", "0.35", marker_of[v]) for v in variants]))
-    return colors, markers, sections
+    params = combo.get("params") or {}
+    approach = combo.get("approach")
+    if approach == "snappy" and "wallLevel" in params:
+        return params["backgroundCellSize"] / 2 ** params["wallLevel"]
+    if approach == "snappy45":
+        mesh = (combo.get("mesh") or {}).get("params", params)
+        if "wallLevel" in mesh and "backgroundCellSize" in mesh:
+            return mesh["backgroundCellSize"] * math.sqrt(2.0) / 2 ** mesh["wallLevel"]
+        return None
+    return params.get("wallCellSize")
 
 
-def legend_right(fig, sections, width_in=2.6):
-    """Draw legend_sections to the RIGHT of the axes and reserve room for it.
+# ---------------------------------------------------------------------------
+# Report figure style
+# ---------------------------------------------------------------------------
+# Every figure goes into the report as is: text width, report-sized fonts, no
+# title and no notes.  Model, scheme set, station, normalisation and the
+# meaning of the reference lines belong in the caption (CAPTIONS in
+# _captions.py, collected into summary/CAPTIONS.md by dashboard.py).
+SUMMARY_DIR = "summary"
+REPORT_WIDTH_IN = 6.3
+REPORT_DPI = 200
+REPORT_RC = {"font.size": 9, "axes.titlesize": 9, "axes.labelsize": 9,
+             "legend.fontsize": 8, "xtick.labelsize": 8, "ytick.labelsize": 8,
+             "lines.linewidth": 1.3, "axes.linewidth": 0.7,
+             "axes.grid": True, "grid.color": "#e4e3df", "grid.linewidth": 0.5,
+             "axes.axisbelow": True, "xtick.direction": "in", "ytick.direction": "in",
+             "xtick.top": True, "ytick.right": True, "legend.frameon": False,
+             "savefig.bbox": "tight", "savefig.pad_inches": 0.02, "savefig.dpi": REPORT_DPI}
 
-    Returns the rect to hand to fig.tight_layout(); the caller must apply it.
-    Section titles are rendered as bold headings inside one legend so the
-    colour block and the marker block stay visually separate.
-    """
+INK, MUTED, EDGE = "#0b0b0b", "#52514e", "#9a9a9a"
+APPROACHES = ("snappy", "gmshTri", "gmshHex", "snappy45")
+APPROACH_COLORS = {"blockMesh": INK, "snappy": "#2a78d6", "gmshTri": "#eb6834",
+                   "gmshHex": "#1baf7a", "snappy45": "#9a3fb5"}
+# Wall core cell sizes, coarsest to finest.
+CORE_COLORS = ("#eda100", "#e34948", "#6250d6", "#008300", "#1f77b4", "#8c564b",
+               "#e377c2", "#7f7f7f")
+CORE_MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
+# Prism-stack heights h+, lowest first.
+STACK_MARKERS = ("o", "s", "D", "^", "v")
+MODEL_LABELS = {"SpalartAllmarasSALSA": "SALSA", "SpalartAllmaras": "SA",
+                "SSGLRROmega2019": "SSG/LRR", "kOmegaSST": "SST", "SSG": "SSG", "LRR": "LRR"}
+
+BASELINE_STYLE = dict(color=INK, linestyle="--", linewidth=1.1, zorder=5)
+STACK_TOP_STYLE = dict(color=MUTED, linestyle=":", linewidth=1.0)
+STACK_TOP_LABEL = "prism-stack top"
+
+SYM = {"cf": r"C_f", "cd": r"C_D", "delta99": r"\delta_{99}", "dstar": r"\delta^*",
+       "theta": r"\theta", "H": r"H", "yplus": r"y^+"}
+X_PLATE_LABEL = r"$x/\bar\delta$"
+
+
+def report_style():
+    """Apply REPORT_RC globally (scripts that only draw report figures)."""
+    import matplotlib
+
+    matplotlib.rcParams.update(REPORT_RC)
+
+
+def error_label(key, where=""):
+    """$\\varepsilon_{C_f}$ [%] etc.; where = e.g. "RMS"."""
+    text = rf"$\varepsilon_{{{SYM.get(key, key)}}}$ [%]"
+    return f"{where} {text}" if where else text
+
+
+def plain_log_axis(ax, axis="y", subs=(1.0, 2.0, 5.0)):
+    """Log axis with plain tick numbers (0.5, 1, 10) instead of 10^x / 3x10^1."""
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+
+    target = ax.yaxis if axis == "y" else ax.xaxis
+    target.set_major_locator(LogLocator(base=10, subs=subs))
+    target.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    target.set_minor_formatter(NullFormatter())
+
+
+Y_DELTA_RANGE = (1e-4, 1.1)
+
+
+def log_y_delta_axis(ax):
+    """Wall-normal axis y/delta99 of every profile figure: logarithmic over
+    Y_DELTA_RANGE, down to y+ < 0.5 at every station."""
+    ax.set_yscale("log")
+    ax.set_ylim(*Y_DELTA_RANGE)
+    plain_log_axis(ax, subs=(1.0,))
+
+
+def plain_ticks(ax, axis="y"):
+    """Plain tick numbers (-10, -1, 0, 1, 10) on a symlog or log axis."""
+    from matplotlib.ticker import FuncFormatter, NullFormatter
+
+    target = ax.yaxis if axis == "y" else ax.xaxis
+    target.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}".replace("-", "\u2212")))
+    target.set_minor_formatter(NullFormatter())
+
+
+def line_handle(label, color=None, linestyle="-", marker=None, **kw):
     from matplotlib.lines import Line2D
 
-    handles, labels = [], []
-    for title, entries in sections:
-        if title:
-            handles.append(Line2D([], [], linestyle="none", marker="none"))
-            escaped = title.replace(' ', r'\ ').replace('_', r'\_')
-            labels.append(f"$\\bf{{{escaped}}}$")
-        for entry in entries:
-            # (label, colour, marker[, linestyle]): without a linestyle, an
-            # entry is a line when it has no marker and a bare marker otherwise.
-            label, color, marker = entry[:3]
-            style = entry[3] if len(entry) > 3 else ("-" if marker is None else "none")
-            handles.append(Line2D([], [], color=color or "0.35",
-                                  marker=marker or "none", linestyle=style,
-                                  markerfacecolor="none" if style != "none" else None,
-                                  markersize=6, linewidth=1.8))
-            labels.append(label)
-    fig_w = fig.get_size_inches()[0]
-    right = max(0.55, 1.0 - width_in / fig_w)
-    fig.legend(handles, labels, loc="center left",
-               bbox_to_anchor=(right + 0.005, 0.5), frameon=False, fontsize=9)
-    return (0, 0, right, 1)
+    return Line2D([], [], color=color or MUTED, linestyle=linestyle, marker=marker,
+                  markersize=4 if marker else 0, markeredgecolor="white",
+                  markeredgewidth=0.4, label=label, **kw)
+
+
+def legend_below(fig, handles, ncol=None):
+    """Legend centred under the axes; returns the rect for fig.tight_layout()."""
+    n = len(handles)
+    ncol = ncol or (n if n <= 4 else int(math.ceil(n / 2)))
+    rows = int(math.ceil(n / ncol))
+    fig.legend(handles=handles, loc="lower center", ncol=ncol, frameon=False,
+               handlelength=2.4, columnspacing=1.2)
+    return (0, (0.17 * rows + 0.06) / fig.get_size_inches()[1], 1, 1)
+
+
+def grid_figure(n_rows, n_cols, row_height=1.9, **kw):
+    """Text-width figure of n_rows x n_cols panels (rows h+, columns approach)."""
+    import matplotlib.pyplot as plt
+
+    width = REPORT_WIDTH_IN if n_cols > 1 else 0.62 * REPORT_WIDTH_IN
+    return plt.subplots(n_rows, n_cols, figsize=(width, row_height * n_rows + 0.7),
+                        squeeze=False, **kw)
+
+
+def label_grid(axes, row_labels, col_labels, ylabel, xlabel):
+    """Approach on top of each column; h+ and the quantity on the left."""
+    for j, label in enumerate(col_labels):
+        if label:
+            axes[0][j].set_title(label)
+    for i, label in enumerate(row_labels):
+        axes[i][0].set_ylabel(f"{label}\n{ylabel}" if label else ylabel)
+    for ax in axes[-1]:
+        ax.set_xlabel(xlabel)
+
+
+def study_schemes(results_root):
+    """'upwind' for a study with the first-order upwind fvSchemes overlay."""
+    root = Path(results_root)
+    return ("upwind" if "upwind" in root.name
+            and (root / "overlay" / "system" / "fvSchemes").is_file() else "base")
