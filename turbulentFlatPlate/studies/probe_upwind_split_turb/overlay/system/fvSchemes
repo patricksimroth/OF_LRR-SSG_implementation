@@ -1,0 +1,74 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSchemes;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+ddtSchemes
+{
+    default         steadyState;
+}
+
+gradSchemes
+{
+    default         Gauss linear;
+}
+
+divSchemes
+{
+    default         none;
+
+    convection_solver                                 bounded Gauss linear;
+    div(phi,U)                                        bounded Gauss linearUpwind grad(U);  
+    div(phid,p)                                       $convection_solver;
+    div(phi,p)                                        $convection_solver;
+    div(phi,e)                                        bounded Gauss limitedLinear 1;
+    div(phi,Ekp)                                      $convection_solver;
+
+    convection_model                                  bounded Gauss upwind;
+    div(phi,k)                                        $convection_model;
+    div(phi,epsilon)                                  $convection_model;
+    div(phi,omega)                                    $convection_model;
+    div(phi,nuTilda)                                  bounded Gauss upwind;
+    div(phi,R)                                        $convection_model;
+                        
+    divergence                                        Gauss linear;  
+    div(((rho*nuEff)*dev2(T(grad(U)))))               $divergence;  // eddy viscosity
+    div((rho*R))                                      $divergence;  // RSM
+    div(((rho*(thermo:mu|rho))*dev2(T(grad(U)))))     $divergence;  // RSM laminar part
+    div(devRhoReff)                                   $divergence;  // LRR (couplingFactor)
+
+}
+
+laplacianSchemes
+{
+    default         Gauss linear uncorrected;
+}
+
+interpolationSchemes
+{
+    default         linear;
+}
+
+snGradSchemes
+{
+    default         uncorrected; //uncorrected oder orthogonal
+}
+
+wallDist
+{
+    method          meshWave;
+}
+
+
+// ************************************************************************* //

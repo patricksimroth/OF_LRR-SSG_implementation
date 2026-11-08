@@ -1,0 +1,19 @@
+# Convergence check of the fine leading-edge blockMesh baseline: L3 (0.28 mm on
+# both sides of x = 0), started from the converged matched L2 run (0.56 mm) of
+# studies/blockMesh_LE_fine.  Mapped from the L2 run with a 4.8 mm upstream block (as in
+# blockMesh_LE_fine) it still diverges at ~120 iterations.  Base schemes.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/blockMesh_LE_L3
+
+models = ["SSGLRROmega2019"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x = 500
+gradingX = 60
+n_x_symmetry = 64
+dxSymmetryLE = 0.00027696

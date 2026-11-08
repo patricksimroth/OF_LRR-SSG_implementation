@@ -1,0 +1,19 @@
+# Sensitivity of the L2 baseline (studies/blockMesh_LE) to the upstream block:
+# 2.2 mm at x = 0 instead of the default 4.8 mm, plate side 0.56 mm.  Matching
+# it to 0.56 mm diverged within ~150 iterations for SSG/LRR and SALSA (base and
+# upwind), as did n_x 992 / n_x_symmetry 96; refining only one side is stable.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/blockMesh_LE_upstream
+
+models = ["SSGLRROmega2019"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x = 420
+gradingX = 30
+n_x_symmetry = 48
+dxSymmetryLE = 0.0022

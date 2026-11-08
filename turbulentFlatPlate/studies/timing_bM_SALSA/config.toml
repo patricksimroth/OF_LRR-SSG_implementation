@@ -1,0 +1,19 @@
+# Timing rerun of the blockMesh baseline of results/turbulentFlatPlate/SALSA (SpalartAllmarasSALSA, base_case schemes):
+# 0.56 mm on both sides of x = 0, mapped start from the converged timing_bMsrc run
+# (overlay/system/mapFieldsSource holds its CLUSTER path - this study runs only there,
+# after timing_bMsrc is archived).
+#
+# Run:   zih.sh submit timing_bM_SALSA
+
+models = ["SpalartAllmarasSALSA"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x = 420
+gradingX = 30
+n_x_symmetry = 64
+dxSymmetryLE = 0.0005574

@@ -1,0 +1,42 @@
+# Timing rerun of the 48 prism combos of results/turbulentFlatPlate/SSGLRR_upwind (SSGLRROmega2019, first-order upwind schemes (overlay/)):
+# same meshes, cluster only, 4 ranks per combo on an exclusive node.  The blockMesh
+# baseline is timed in timing_bMsrc* (source run) + timing_bM_SSGLRR_upwind (mapped run).
+#
+# Run:   zih.sh submit timing_SSGLRR_upwind
+
+models = ["SSGLRROmega2019"]
+approach = ["snappy", "gmshTri", "gmshHex", "snappy45"]
+
+[params]
+firstLayerThickness = 1.0e-06
+expansionRatio = 1.17
+nPrisms = [20, 40, 50]
+
+[params.snappy]
+backgroundCellSize = 0.02
+sets = [
+    { wallLevel = 2, refineDistance = 0.1 },
+    { wallLevel = 3, refineDistance = 0.05 },
+    { wallLevel = 4, refineDistance = 0.025 },
+    { wallLevel = 5, refineDistance = 0.0125 },
+]
+
+[params.snappy45]
+sets = [
+    { wallLevel = 2, refineDistance = 0.1 },
+    { wallLevel = 3, refineDistance = 0.05 },
+    { wallLevel = 4, refineDistance = 0.025 },
+    { wallLevel = 5, refineDistance = 0.0125 },
+]
+
+[params.gmshTri]
+wallCellSize = [0.005, 0.0025, 0.00125, 0.000625]
+farCellSize = 0.06
+distMin = 0.01
+distMax = 0.4
+
+[params.gmshHex]
+wallCellSize = [0.005, 0.0025, 0.00125, 0.000625]
+farCellSize = 0.06
+distMin = 0.01
+distMax = 0.4

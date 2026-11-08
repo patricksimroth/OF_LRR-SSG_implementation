@@ -1,0 +1,22 @@
+# New blockMesh baseline with a resolved leading edge (ANALYSIS.md §4.2, §7.5):
+# 0.56 mm (L2, new reference) and 0.28 mm (L3, convergence check) at x = 0
+# instead of 4.4 mm, with dx at x = 1 m kept at ~8.7 mm.  The upstream block
+# keeps its default grading (4.8 mm at x = 0): refining both sides of the
+# leading edge diverges within ~150 iterations (see blockMesh_LE_upstream).
+# Base schemes; the L2 runs replace the blockMesh runs of SALSA and SSGLRR.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/blockMesh_LE
+
+models = ["SSGLRROmega2019", "SpalartAllmarasSALSA"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x_symmetry = 24
+sets = [
+    { n_x = 420, gradingX = 30 },
+    { n_x = 500, gradingX = 60 },
+]

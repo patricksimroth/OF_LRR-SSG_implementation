@@ -1,0 +1,19 @@
+# Sensitivity of the L2 baseline (studies/blockMesh_LE) to the upstream block,
+# coarse side: 9.6 mm at x = 0 instead of the default 4.8 mm, plate side
+# 0.56 mm.  The fine side cannot be tested: 2.2 mm (blockMesh_LE_upstream)
+# and 0.56 mm upstream both diverge within ~250 iterations.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/blockMesh_LE_upstream_coarse
+
+models = ["SSGLRROmega2019"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x = 420
+gradingX = 30
+n_x_symmetry = 16
+dxSymmetryLE = 0.0096

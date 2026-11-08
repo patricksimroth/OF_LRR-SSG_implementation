@@ -1,0 +1,16 @@
+# Probe (analysis 2026-10-28): is the SSG/LRR prism offset wall-normal grading
+# (n_y 77 = ratio 1.17 like the prism stack) or leading-edge streamwise
+# resolution (n_x 496 = half the LE spacing)?  Base schemes.
+models = ["SSGLRROmega2019", "SpalartAllmarasSALSA"]
+approach = ["blockMesh"]
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+gradingX = 3
+n_x_symmetry = 24
+sets = [
+    { n_y = 77, n_x = 248 },
+    { n_y = 193, n_x = 496 },
+]

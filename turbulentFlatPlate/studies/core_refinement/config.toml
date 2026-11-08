@@ -20,10 +20,10 @@
 # instead of a 0.1 m band of 0.625 mm cells (~1.5M cells).
 #
 # blockMesh is the single unchanged baseline every error figure compares to.
-# 1 + 3 approaches x 3 nPrisms x 4 scales = 37 combos.
+# 1 + 3 approaches x 3 nPrisms x 4 scales + snappy45 x 3 nPrisms x 2 scales = 43 combos.
 
 models = ["SpalartAllmarasSALSA"]
-approach = ["blockMesh", "snappy", "gmshTri", "gmshHex"]
+approach = ["blockMesh", "snappy", "gmshTri", "gmshHex", "snappy45"]
 
 [params]
 firstLayerThickness = 1.0e-06
@@ -38,6 +38,21 @@ n_x_symmetry = 24
 
 [params.snappy]
 backgroundCellSize = 0.02
+sets = [
+    { wallLevel = 2, refineDistance = 0.1 },
+    { wallLevel = 3, refineDistance = 0.05 },
+    { wallLevel = 4, refineDistance = 0.025 },
+    { wallLevel = 5, refineDistance = 0.0125 },
+]
+
+[params.snappy45]
+# snappy with the core grid tilted 45 deg to the flow.  backgroundCellSize
+# defaults to 0.02/sqrt(2): the snapped wall faces of a tilted square are
+# h*sqrt(2) long, so the streamwise wall spacing matches snappy's 5 / 2.5 mm.
+# wallLevel 4/5 (1.25 / 0.625 mm) keep the wallLevel-3 bands above level 3
+# and put the finer levels in 25 / 12.5 mm strips at the wall (snappy45
+# outerWallLevel; snappy's bands are unstable there) - see AGENTS.md.  They
+# were run as <study>__snappy45 (2/3) and <study>__snappy45_fine (4/5).
 sets = [
     { wallLevel = 2, refineDistance = 0.1 },
     { wallLevel = 3, refineDistance = 0.05 },

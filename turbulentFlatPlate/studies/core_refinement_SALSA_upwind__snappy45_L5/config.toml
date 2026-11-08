@@ -1,0 +1,22 @@
+# Study: the wallLevel 5 snappy45 runs of studies/core_refinement_SALSA_upwind (snappy with the core grid tilted
+# 45 deg to the flow), run on their own so results/<case>/core_refinement_SALSA_upwind is not wiped.
+# Split from <study>__snappy45 (levels 2/3) after the first level-4/5 meshes
+# crashed; wallLevel 4 runs in <study>__snappy45_fine, wallLevel 5 here with
+# farRefineDistance 0.025: the bands above the finest one are wallLevel 4's
+# (25/75/225/450 mm); with snappy's 3x layout the energy equation diverges.  Merged into that study's results for post-processing; same model,
+# schemes (overlay/) and grid as there.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/core_refinement_SALSA_upwind__snappy45_L5 [--isolated]
+
+models = ["SpalartAllmarasSALSA"]
+approach = "snappy45"
+
+[params]
+firstLayerThickness = 1.0e-06
+expansionRatio = 1.17
+nPrisms = [20, 40, 50]
+
+[params.snappy45]
+sets = [
+    { wallLevel = 5, refineDistance = 0.0125, farRefineDistance = 0.025 },
+]

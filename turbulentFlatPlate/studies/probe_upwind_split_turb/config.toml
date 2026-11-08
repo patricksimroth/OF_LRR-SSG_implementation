@@ -1,0 +1,13 @@
+# Probe (analysis 2026-10-28): which upwind term causes the +6 % bias on tilted
+# cores?  Only the turb convection terms are first-order upwind (see overlay/).
+models = ["SpalartAllmarasSALSA"]
+approach = ["snappy45"]
+
+[params]
+firstLayerThickness = 1.0e-06
+expansionRatio = 1.17
+nPrisms = 40
+
+[params.snappy45]
+wallLevel = 3
+refineDistance = 0.05

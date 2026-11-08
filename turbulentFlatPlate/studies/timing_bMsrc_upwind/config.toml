@@ -1,0 +1,17 @@
+# Timing rerun, source runs of the blockMesh baseline (first-order upwind schemes (overlay/)): the L2 mesh with the
+# default upstream block (4.8 mm at x = 0), from uniform fields as in studies/blockMesh_LE.
+# timing_bM_* start the 0.56 mm baseline from these runs (cluster path).
+#
+# Run:   zih.sh submit timing_bMsrc_upwind
+
+models = ["SSGLRROmega2019", "SpalartAllmarasSALSA"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x = 420
+gradingX = 30
+n_x_symmetry = 24

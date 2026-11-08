@@ -1,0 +1,17 @@
+# L2 blockMesh baseline of studies/blockMesh_LE with first-order upwind
+# (overlay/system/fvSchemes = core_refinement_SALSA_upwind's); replaces the
+# blockMesh run of results/turbulentFlatPlate/SALSA_upwind.
+#
+# Run locally (SALSA_upwind baseline was v2512)
+
+models = ["SpalartAllmarasSALSA"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x = 420
+gradingX = 30
+n_x_symmetry = 24

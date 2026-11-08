@@ -1,0 +1,21 @@
+# Fine leading-edge blockMesh baselines (SALSA, base schemes): 0.56 mm (L2) and 0.28 mm
+# (L3) on BOTH sides of x = 0 (dxSymmetryLE = the plate's first cell).  From
+# uniform fields these diverge in the start-up transient (~150 iterations);
+# overlay/system/mapFieldsSource starts them from the converged L2 run of
+# studies/blockMesh_LE (upstream block 4.8 mm), which base_case/Allrun maps on.
+#
+# Run:   ./run_study.sh turbulentFlatPlate/studies/blockMesh_LE_fine_SALSA
+
+models = ["SpalartAllmarasSALSA"]
+approach = "blockMesh"
+
+[params]
+firstLayerThickness = 1.0e-06
+
+[params.blockMesh]
+n_y = 193
+n_x_symmetry = 64
+sets = [
+    { n_x = 420, gradingX = 30, dxSymmetryLE = 0.0005574 },
+    { n_x = 500, gradingX = 60, dxSymmetryLE = 0.00027696 },
+]
