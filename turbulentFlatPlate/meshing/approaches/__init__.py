@@ -3,12 +3,14 @@ from .blockMesh import BlockMeshApproach
 from .gmshHex import GmshHexApproach
 from .gmshTri import GmshTriApproach
 from .snappy import SnappyApproach
+from .snappy45 import Snappy45Approach
 
 REGISTRY = {
     approach.name: approach
     for approach in (
         BlockMeshApproach(),
         SnappyApproach(),
+        Snappy45Approach(),
         GmshTriApproach(),
         GmshHexApproach(),
     )

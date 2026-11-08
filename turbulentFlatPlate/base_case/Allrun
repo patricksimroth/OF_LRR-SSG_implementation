@@ -19,6 +19,18 @@ else
     logLink log.blockMesh
 fi
 
+# Optional initial fields from a converged run (study overlay
+# system/mapFieldsSource = its case dir): fine leading-edge blockMesh meshes
+# diverge in the start-up transient from uniform fields, not from the solution.
+if [ -f system/mapFieldsSource ]; then
+    source_case=$(cat system/mapFieldsSource)
+    runApplication mapFields "$source_case" -consistent -sourceTime latestTime || exit 1
+    logLink log.mapFields
+    for field in 0/*; do
+        [ -e "0.orig/${field#0/}" ] || rm -rf "$field"
+    done
+fi
+
 runApplication decomposePar || exit 1
 logLink log.decomposePar
 

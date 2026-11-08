@@ -17,7 +17,8 @@ Pipeline:
      them and each approach is handed only the parameters it declares.
      A [params.<approach>] sub-table overrides [params] for that approach
      (each approach sizes its core with its own parameters).
-  2. assemble run/<case>/<model>__<tag>/ from base_case + model overlay
+  2. assemble run/<case>/<model>__<tag>/ from base_case + model overlay +
+     the study's own overlay/ (e.g. system/fvSchemes for a scheme study)
   3. approach.generate() -> constant/polyMesh (blockMesh / snappy / gmsh ...)
   4. run/<case>/study_manifest.json (consumed by the post-processing, which
      reads the study name from it to resolve results/<case>/<study>/)
@@ -68,16 +69,28 @@ def parse_args(argv):
     parser.add_argument("--no-build", action="store_true",
                         help="skip the wmake of the src/ libraries (the study then "
                              "runs against whatever .so is already built)")
+    parser.add_argument("--isolated", action="store_true",
+                        help="run in run/<case>__<study> with its own lock instead "
+                             "of run/<case>, so several studies can run at once")
     return parser.parse_args(argv)
 
 
-def run_postproc(case_dir, run_case_dir):
+def run_postproc(case_dir, run_case_dir, isolated=False):
     pp_src = case_dir / "_postProcessing"
     if not pp_src.is_dir():
         return []
-    for script in pp_src.glob("*.py"):
-        shutil.copy2(script, run_case_dir / script.name)
-    names = [p.name for p in sorted(run_case_dir.glob("*.py"))
+    # Isolated runs live outside run/<case>, where resolve_case_paths would
+    # not find them from a copied script; run the permanent scripts instead and
+    # point them at the run dir, as run_postpro.sh does for archives.
+    env = None
+    script_dir = run_case_dir
+    if isolated:
+        env = {**os.environ, "PP_RUN_CASE_DIR": str(run_case_dir)}
+        script_dir = pp_src
+    else:
+        for script in pp_src.glob("*.py"):
+            shutil.copy2(script, run_case_dir / script.name)
+    names = [p.name for p in sorted(script_dir.glob("*.py"))
              if not p.name.startswith("_")]
     ordered = ([n for n in names if n == "postpro.py"]
                + [n for n in names if n not in ("postpro.py", "dashboard.py")]
@@ -87,8 +100,8 @@ def run_postproc(case_dir, run_case_dir):
         log_path = run_case_dir / f"{Path(name).stem}.log"
         print(f"  -> post-processing: {name} (log: {log_path})")
         with open(log_path, "w") as log:
-            rc = subprocess.run([str(VENV_PYTHON), str(run_case_dir / name)],
-                                cwd=str(run_case_dir), stdout=log,
+            rc = subprocess.run([str(VENV_PYTHON), str(script_dir / name)],
+                                cwd=str(script_dir), stdout=log, env=env,
                                 stderr=subprocess.STDOUT).returncode
         if rc != 0:
             print(f"  [FAILED] {name} (exit {rc}) - log: {log_path}")
@@ -195,12 +208,13 @@ def main(argv=None):
     # A study wipes run/<case> on startup, so two of them at once silently
     # delete each other's combos mid-solve (the second run's Allrun then dies
     # on a missing directory).  Refuse instead.
-    lock = acquire_lock(case_name)
+    run_name = f"{case_name}__{study_name}" if args.isolated else case_name
+    lock = acquire_lock(run_name)
     if lock is None:
         return 2
     try:
-        return _run_study(args, case_name, study_name, study_dir, approaches,
-                          by_name, plan)
+        return _run_study(args, case_name, run_name, study_name, study_dir,
+                          approaches, by_name, plan)
     finally:
         lock.unlink(missing_ok=True)
 
@@ -234,8 +248,9 @@ def acquire_lock(case_name):
     return lock
 
 
-def _run_study(args, case_name, study_name, study_dir, approaches, by_name, plan):
-    run_case_dir = RUN_ROOT / case_name
+def _run_study(args, case_name, run_name, study_name, study_dir, approaches,
+               by_name, plan):
+    run_case_dir = RUN_ROOT / run_name
     if run_case_dir.exists():
         shutil.rmtree(run_case_dir)
     run_case_dir.mkdir(parents=True)
@@ -267,8 +282,13 @@ def _run_study(args, case_name, study_name, study_dir, approaches, by_name, plan
             model_dir = CASE_DIR / entry["model"]
             if model_dir.is_dir():
                 copy_tree(model_dir, target)
+            if (study_dir / "overlay").is_dir():
+                copy_tree(study_dir / "overlay", target)
+            mesh_start = time.perf_counter()
             entry["mesh"] = by_name[entry["approach"]].generate(
                 target, entry["params"])
+            entry["mesh"]["generate_seconds"] = round(
+                time.perf_counter() - mesh_start, 2)
             entry["status"] = "ok"
             # Allrun starts with `rm -f log.*`, which would delete the mesh
             # generation logs (snappyHexMesh, gmsh, ...); keep them.
@@ -284,6 +304,8 @@ def _run_study(args, case_name, study_name, study_dir, approaches, by_name, plan
     print(f"  manifest -> {manifest_path}")
     report_provenance(write_provenance(results_study_dir, case_name, study_name,
                                        study_dir, run_case_dir))
+    if (study_dir / "overlay").is_dir():
+        copy_tree(study_dir / "overlay", results_study_dir / "overlay")
     print(f"  results  -> {results_study_dir}")
 
     failed_mesh = [e["run_dir"] for e in plan if e["status"] != "ok"]
@@ -326,7 +348,7 @@ def _run_study(args, case_name, study_name, study_dir, approaches, by_name, plan
         else:
             print(f"  [done] {entry['run_dir']} in {elapsed:.0f}s")
 
-    postproc_failed = run_postproc(CASE_DIR, run_case_dir)
+    postproc_failed = run_postproc(CASE_DIR, run_case_dir, args.isolated)
 
     # run/<case> is wiped by the next study, so the figures above would become
     # unreproducible the moment another study starts.  Archive what the
