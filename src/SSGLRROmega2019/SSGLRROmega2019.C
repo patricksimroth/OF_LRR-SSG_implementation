@@ -223,9 +223,7 @@ void SSGLRROmega2019<BasicTurbulenceModel>::correct()
     this->boundNormalStress(R);
 
     // Realizability (Cauchy-Schwarz): |Rij| <= sqrt(Rii*Rjj).  boundNormalStress
-    // only clamps the normal stresses; without this, cells whose k collapses to
-    // kMin keep a finite Rxy, so G/k and dev(R)/k explode (k 1e-15 -> 6e5 in
-    // one iteration at the boundary-layer edge on snappy/gmsh meshes).
+    // only clamps the normal stresses
     {
         symmTensorField& Ri = R.primitiveFieldRef();
         forAll(Ri, celli)
